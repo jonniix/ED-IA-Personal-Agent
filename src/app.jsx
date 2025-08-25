@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer } from "lucide-react";
+import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer, Archive } from "lucide-react";
+import { exportOfferToPdf } from "./pdf/exportPdf";
+import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "./lib/db";
 
 // --- Utility helpers ---
 const currency = (n, currency = "CHF") =>
@@ -13,14 +15,24 @@ const number = (n, digits = 0) =>
 
 const cls = (...arr) => arr.filter(Boolean).join(" ");
 
+// Funzione per generare reference offerta progressivo
+function nextOfferRef() {
+  const key = 'pv_last_offer_ref';
+  const last = Number(localStorage.getItem(key) || '0');
+  let now = Date.now();
+  if (now <= last) now = last + 1;
+  localStorage.setItem(key, String(now));
+  return `FV-${now}`;
+}
+
 // Default settings (admin-editable)
 const DEFAULT_SETTINGS = {
   company: {
-    name: "La Mia Azienda FV",
+    name: "Edil Repairs Sagl",
     logoText: "FV+",
     address: "Via Sole 1, 6900 Lugano",
     phone: "+41 00 000 00 00",
-    email: "info@azienda-fv.ch",
+    email: "info@edil-repairs.ch",
   },
   pricing: {
     energyPriceCHFPerKWh: 0.28,
@@ -43,6 +55,10 @@ const DEFAULT_SETTINGS = {
     selfConsumptionPctWithoutHeatPump: 65,
     exportPriceCHFPerKWh: 0.05,
   },
+  environment: {
+    co2GridKgPerKWh: 0.12,
+    co2PerTreeKgPerYear: 21
+  },
   pvSizesKW: [8, 10, 12, 16, 25, 33],
   // Mini mappa CAP->Comune (estendibile in Admin). L'utente può sempre sovrascrivere manualmente.
   capToCity: {
@@ -56,6 +72,13 @@ const DEFAULT_SETTINGS = {
     "3000": "Bern",
     "4051": "Basel",
   },
+  locked: {
+    company: false,
+    pricing: false,
+    curve: false,
+    incentives: false,
+    energy: false
+  }
 };
 
 const loadSettings = () => {
@@ -69,8 +92,10 @@ const loadSettings = () => {
       ...parsed,
       company: { ...DEFAULT_SETTINGS.company, ...(parsed.company || {}) },
       pricing: { ...DEFAULT_SETTINGS.pricing, ...(parsed.pricing || {}) },
+      environment: { ...DEFAULT_SETTINGS.environment, ...(parsed.environment || {}) },
       capToCity: { ...DEFAULT_SETTINGS.capToCity, ...(parsed.capToCity || {}) },
       pvSizesKW: parsed.pvSizesKW || DEFAULT_SETTINGS.pvSizesKW,
+      locked: { ...DEFAULT_SETTINGS.locked, ...(parsed.locked || {}) }
     };
   } catch (e) {
     return DEFAULT_SETTINGS;
@@ -89,10 +114,11 @@ const loadOffer = () => {
 // --- Helper per prezzo da curva ---
 function pricePerKWFromCurve(kw, curve){
   if(!curve) return 0;
-  const minKW=+curve.minKW||8, maxKW=+curve.maxKW||200;
+  const minKW=parseFloat(String(curve.minKW).replace(',','.'))||8;
+  const maxKW=parseFloat(String(curve.maxKW).replace(',','.'))||200;
   const pMin=parseFloat(String(curve.priceAtMin).replace(',','.'))||2000;
   const pMax=parseFloat(String(curve.priceAtMax).replace(',','.'))||1000;
-  const k=Math.max(minKW, Math.min(maxKW, +kw||0));
+  const k=Math.max(minKW, Math.min(maxKW, parseFloat(String(kw).replace(',','.'))||0));
   const t=(k-minKW)/(maxKW-minKW);
   return pMin+(pMax-pMin)*t;
 }
@@ -100,7 +126,7 @@ function pricePerKWFromCurve(kw, curve){
 // --- Core App ---
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("pv_theme") || "dark");
-  const [route, setRoute] = useState("home"); // home | new | maint | admin | offer
+  const [route, setRoute] = useState("home"); // home | new | maint | admin | offer | archive
   const [settings, setSettings] = useState(loadSettings);
   const [installForm, setInstallForm] = useState({
     firstName: "",
@@ -125,6 +151,10 @@ export default function App() {
   });
 
   const [offer, setOffer] = useState(loadOffer());
+  const [unlockedGroups, setUnlockedGroups] = useState(() => {
+    const stored = sessionStorage.getItem('pv_unlocked_groups');
+    return stored ? JSON.parse(stored) : {};
+  });
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -161,12 +191,15 @@ export default function App() {
   // Generate installation offer
   const buildInstallOffer = (selectedKW) => {
     const p = settings.pricing;
-    const annualCost = Number(installForm.annualCostCHF || 0);
-    const kWh = installForm.annualKWh ? Number(installForm.annualKWh) : annualCost / p.energyPriceCHFPerKWh;
+    const annualCost = parseFloat(String(installForm.annualCostCHF).replace(',', '.')) || 0;
+    const kWh = installForm.annualKWh ? parseFloat(String(installForm.annualKWh).replace(',', '.')) || 0 : annualCost / p.energyPriceCHFPerKWh;
     const sizes = suggestSizes(kWh);
 
+    const offerRef = nextOfferRef();
+    
     const payload = {
       type: "install",
+      offerRef,
       createdAt: new Date().toISOString(),
       customer: installForm,
       computed: {
@@ -180,19 +213,23 @@ export default function App() {
     };
     setOffer(payload);
     saveOffer(payload);
+    saveOfferToDB(payload);
     setRoute("offer");
   };
 
   // Generate maintenance offer (calcolo prezzo nascosto)
   const buildMaintOffer = () => {
     const p = settings.pricing;
-    const panels = Math.max(0, Number(maintForm.panels || 0));
+    const panels = Math.max(0, parseFloat(String(maintForm.panels).replace(',', '.')) || 0);
     const net = panels * p.maintenancePricePerPanelCHF; // non mostrato nei campi, solo totale finale
     const vat = (net * p.vatPercent) / 100;
     const gross = net + vat;
 
+    const offerRef = nextOfferRef();
+    
     const payload = {
       type: "maintenance",
+      offerRef,
       createdAt: new Date().toISOString(),
       customer: maintForm,
       computed: {
@@ -207,6 +244,7 @@ export default function App() {
     };
     setOffer(payload);
     saveOffer(payload);
+    saveOfferToDB(payload);
     setRoute("offer");
   };
 
@@ -227,6 +265,12 @@ export default function App() {
     setRoute("home");
   };
 
+  const unlockGroup = (group) => {
+    const newUnlocked = {...unlockedGroups, [group]: true};
+    setUnlockedGroups(newUnlocked);
+    sessionStorage.setItem('pv_unlocked_groups', JSON.stringify(newUnlocked));
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <TopBar theme={theme} setTheme={setTheme} route={route} setRoute={setRoute} company={settings.company} />
@@ -244,12 +288,28 @@ export default function App() {
         {route === "maint" && (
           <MaintenanceForm form={maintForm} setForm={setMaintForm} settings={settings} onCreate={buildMaintOffer} />
         )}
-        {route === "admin" && <AdminPanel settings={settings} setSettings={setSettings} />}
+        {route === "admin" && (
+          <AdminPanel 
+            settings={settings} 
+            setSettings={setSettings} 
+            unlockedGroups={unlockedGroups}
+            unlockGroup={unlockGroup}
+          />
+        )}
         {route === "offer" && offer && (
           <OfferView
             offer={offer}
             onNew={resetAll}
             onEdit={() => setRoute(offer?.type === 'install' ? 'new' : 'maint')}
+          />
+        )}
+        {route === "archive" && (
+          <ArchiveView 
+            onSelectOffer={(offer) => {
+              setOffer(offer);
+              saveOffer(offer);
+              setRoute("offer");
+            }}
           />
         )}
       </main>
@@ -323,16 +383,15 @@ function TopBar({ theme, setTheme, route, setRoute, company }) {
     <div className="sticky top-0 z-20 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 font-bold text-white dark:bg-blue-500">
-            {company.logoText}
-          </div>
+          <img src="/img/logoedil.png" alt="Edil Repairs" className="h-8 w-auto object-contain" />
           <div>
             <div className="text-sm font-semibold leading-4">{company.name}</div>
-            <div className="text-xs text-zinc-500">Toolkit per Eventi FV</div>
+            <div className="text-xs text-zinc-500">Edil Repairs Artificial Intelligence</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" icon={Home} onClick={() => setRoute("home")}>Home</Button>
+          <Button variant="ghost" icon={Archive} onClick={() => setRoute("archive")}>Archivio</Button>
           <Button variant="ghost" icon={Settings} onClick={() => setRoute("admin")}>Admin</Button>
           <Button
             variant="subtle"
@@ -436,11 +495,11 @@ function PersonFields({ form, setForm, settings }) {
 function InstallForm({ form, setForm, settings, onCreate }) {
   const p = settings.pricing;
   const derivedKWh = useMemo(() => {
-    const cost = Number(form.annualCostCHF || 0);
+    const cost = parseFloat(String(form.annualCostCHF).replace(',', '.')) || 0;
     return cost > 0 ? cost / p.energyPriceCHFPerKWh : 0;
   }, [form.annualCostCHF, p.energyPriceCHFPerKWh]);
 
-  const kWh = Number(form.annualKWh || 0) || derivedKWh;
+  const kWh = parseFloat(String(form.annualKWh).replace(',', '.')) || 0 || derivedKWh;
 
   // Nuova funzione per opzioni S/M/L
   function buildOptionsAround(sizes, targetKW) {
@@ -479,75 +538,6 @@ function InstallForm({ form, setForm, settings, onCreate }) {
 
   const [selectedKW, setSelectedKW] = useState(mid);
   useEffect(() => { setSelectedKW(mid); }, [mid]);
-
-  // Generate installation offer
-  const buildInstallOffer = (selectedKW) => {
-    const p = settings.pricing;
-    const annualCost = Number(installForm.annualCostCHF || 0);
-    const kWh = installForm.annualKWh ? Number(installForm.annualKWh) : annualCost / p.energyPriceCHFPerKWh;
-    const sizes = suggestSizes(kWh);
-
-    const payload = {
-      type: "install",
-      createdAt: new Date().toISOString(),
-      customer: installForm,
-      computed: {
-        annualKWh: kWh,
-        suggestedSizesKW: sizes,
-        heatPump: installForm.heatPump,
-        energyPriceCHFPerKWh: p.energyPriceCHFPerKWh,
-        selectedKW: selectedKW ?? (sizes[1] || sizes[0] || 0),
-      },
-      settingsSnapshot: settings,
-    };
-    setOffer(payload);
-    saveOffer(payload);
-    setRoute("offer");
-  };
-
-  // Generate maintenance offer (calcolo prezzo nascosto)
-  const buildMaintOffer = () => {
-    const p = settings.pricing;
-    const panels = Math.max(0, Number(maintForm.panels || 0));
-    const net = panels * p.maintenancePricePerPanelCHF; // non mostrato nei campi, solo totale finale
-    const vat = (net * p.vatPercent) / 100;
-    const gross = net + vat;
-
-    const payload = {
-      type: "maintenance",
-      createdAt: new Date().toISOString(),
-      customer: maintForm,
-      computed: {
-        panels,
-        net,
-        vat,
-        gross,
-        pricePerPanel: p.maintenancePricePerPanelCHF,
-        vatPercent: p.vatPercent,
-      },
-      settingsSnapshot: settings,
-    };
-    setOffer(payload);
-    saveOffer(payload);
-    setRoute("offer");
-  };
-
-  const resetAll = () => {
-    setInstallForm({
-      firstName: "",
-      lastName: "",
-      street: "",
-      cap: "",
-      city: "",
-      country: "Svizzera",
-      annualCostCHF: "",
-      annualKWh: "",
-      heatPump: false,
-    });
-    setMaintForm({ firstName: "", lastName: "", street: "", cap: "", city: "", country: "Svizzera", panels: "", extraNotes: "" });
-    setOffer(null);
-    setRoute("home");
-  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
@@ -632,7 +622,7 @@ function InstallForm({ form, setForm, settings, onCreate }) {
 
 function MaintenanceForm({ form, setForm, settings, onCreate }) {
   const p = settings.pricing;
-  const panels = Math.max(0, Number(form.panels || 0));
+  const panels = Math.max(0, parseFloat(String(form.panels).replace(',', '.')) || 0);
   const net = panels * p.maintenancePricePerPanelCHF;
   const vat = (net * p.vatPercent) / 100;
   const gross = net + vat;
@@ -677,7 +667,49 @@ function MaintenanceForm({ form, setForm, settings, onCreate }) {
   );
 }
 
-function AdminPanel({ settings, setSettings }) {
+function PasswordModal({ isOpen, onClose, onSuccess }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (password === '979851') {
+      onSuccess();
+      onClose();
+    } else {
+      setError('Password errata');
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 w-full max-w-md mx-4">
+        <h3 className="text-lg font-semibold mb-4">Inserisci la password</h3>
+        <form onSubmit={handleSubmit}>
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setError('');
+            }}
+            placeholder="Password"
+            className="w-full mb-2"
+          />
+          {error && <div className="text-red-500 text-sm mb-2">{error}</div>}
+          <div className="flex gap-2 justify-end">
+            <Button variant="ghost" onClick={onClose}>Annulla</Button>
+            <Button type="submit">Sblocca</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
   // Gestione stringhe locali per i campi numerici
   const [local, setLocal] = useState(() => {
     const s = JSON.parse(JSON.stringify(settings));
@@ -686,6 +718,11 @@ function AdminPanel({ settings, setSettings }) {
     s.pricing.maintenancePricePerPanelCHF = String(s.pricing.maintenancePricePerPanelCHF ?? "");
     s.pricing.vatPercent = String(s.pricing.vatPercent ?? "");
     s.pricing.systemPricePerKWCHF = String(s.pricing.systemPricePerKWCHF ?? "");
+    s.pricing.selfConsumptionPctWithHeatPump = String(s.pricing.selfConsumptionPctWithHeatPump ?? "");
+    s.pricing.selfConsumptionPctWithoutHeatPump = String(s.pricing.selfConsumptionPctWithoutHeatPump ?? "");
+    s.pricing.exportPriceCHFPerKWh = String(s.pricing.exportPriceCHFPerKWh ?? "");
+    s.environment.co2GridKgPerKWh = String(s.environment.co2GridKgPerKWh ?? "");
+    s.environment.co2PerTreeKgPerYear = String(s.environment.co2PerTreeKgPerYear ?? "");
     return s;
   });
 
@@ -711,16 +748,7 @@ function AdminPanel({ settings, setSettings }) {
     String(settings.pricing.incentives?.municipalCHFPerKW ?? 10)
   );
 
-  // Autoconsumo & Immissione: string-first state
-  const [selfWithHP, setSelfWithHP] = useState(() =>
-    String(settings.pricing.selfConsumptionPctWithHeatPump ?? 75)
-  );
-  const [selfWithoutHP, setSelfWithoutHP] = useState(() =>
-    String(settings.pricing.selfConsumptionPctWithoutHeatPump ?? 65)
-  );
-  const [exportPrice, setExportPrice] = useState(() =>
-    String(settings.pricing.exportPriceCHFPerKWh ?? 0.05)
-  );
+  const [passwordModal, setPasswordModal] = useState({ open: false, group: null });
 
   // Normalizza i campi numerici su blur/salva (esteso)
   const normalizePricing = (pricing) => {
@@ -765,6 +793,19 @@ function AdminPanel({ settings, setSettings }) {
     setLocal(next);
   };
 
+  const handleUnlock = (group) => {
+    if (unlockedGroups[group]) return;
+    setPasswordModal({ open: true, group });
+  };
+
+  const handlePasswordSuccess = (group) => {
+    unlockGroup(group);
+  };
+
+  const isGroupLocked = (group) => {
+    return settings.locked[group] && !unlockedGroups[group];
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
       <div className="mb-4 flex items-center justify-between">
@@ -773,30 +814,78 @@ function AdminPanel({ settings, setSettings }) {
       </div>
       <div className="grid gap-4">
         <Card>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Azienda</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Azienda</h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.company}
+                onChange={(v) => update("locked.company", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('company') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('company')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-3">
             <Labeled label="Nome società">
-              <Input value={local.company.name} onChange={(e) => update("company.name", e.target.value)} />
+              <Input 
+                value={local.company.name} 
+                onChange={(e) => update("company.name", e.target.value)} 
+                disabled={isGroupLocked('company')}
+              />
             </Labeled>
             <Labeled label="Logo (testo breve)">
-              <Input value={local.company.logoText} onChange={(e) => update("company.logoText", e.target.value)} />
+              <Input 
+                value={local.company.logoText} 
+                onChange={(e) => update("company.logoText", e.target.value)} 
+                disabled={isGroupLocked('company')}
+              />
             </Labeled>
             <Labeled label="Telefono">
-              <Input value={local.company.phone} onChange={(e) => update("company.phone", e.target.value)} />
+              <Input 
+                value={local.company.phone} 
+                onChange={(e) => update("company.phone", e.target.value)} 
+                disabled={isGroupLocked('company')}
+              />
             </Labeled>
             <Labeled label="Email">
-              <Input value={local.company.email} onChange={(e) => update("company.email", e.target.value)} />
+              <Input 
+                value={local.company.email} 
+                onChange={(e) => update("company.email", e.target.value)} 
+                disabled={isGroupLocked('company')}
+              />
             </Labeled>
             <div className="md:col-span-3">
               <Labeled label="Indirizzo">
-                <Input value={local.company.address} onChange={(e) => update("company.address", e.target.value)} />
+                <Input 
+                  value={local.company.address} 
+                  onChange={(e) => update("company.address", e.target.value)} 
+                  disabled={isGroupLocked('company')}
+                />
               </Labeled>
             </div>
           </div>
         </Card>
 
         <Card>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Parametri di calcolo</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Parametri di calcolo</h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.pricing}
+                onChange={(v) => update("locked.pricing", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('pricing') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('pricing')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-5">
             <Labeled label="Prezzo energia (CHF/kWh)">
               <Input
@@ -816,6 +905,7 @@ function AdminPanel({ settings, setSettings }) {
                     }
                   }));
                 }}
+                disabled={isGroupLocked('pricing')}
               />
             </Labeled>
             <Labeled label="Manutenzione CHF/pannello (excl. IVA)">
@@ -836,6 +926,7 @@ function AdminPanel({ settings, setSettings }) {
                     }
                   }));
                 }}
+                disabled={isGroupLocked('pricing')}
               />
             </Labeled>
             <Labeled label="IVA %">
@@ -856,6 +947,7 @@ function AdminPanel({ settings, setSettings }) {
                     }
                   }));
                 }}
+                disabled={isGroupLocked('pricing')}
               />
             </Labeled>
             <Labeled label="Prezzo unitario impianto (CHF/kW)">
@@ -876,6 +968,7 @@ function AdminPanel({ settings, setSettings }) {
                     }
                   }));
                 }}
+                disabled={isGroupLocked('pricing')}
               />
             </Labeled>
             <Labeled label="Taglie FV disponibili (kW, separate da virgola)">
@@ -888,24 +981,40 @@ function AdminPanel({ settings, setSettings }) {
                 onBlur={() => {
                   const arr = pvSizesText
                     .split(/[;,\s]+/)
-                    .map(x => Number(String(x).replace(",", ".")))
+                    .map(x => parseFloat(String(x).replace(",", ".")))
                     .filter(x => !isNaN(x) && x > 0);
                   setLocal(l => ({ ...l, pvSizesKW: arr }));
                   setPvSizesText(arr.join(", "));
                 }}
+                disabled={isGroupLocked('pricing')}
               />
             </Labeled>
           </div>
         </Card>
-        {/* --- Nuova sezione: Range prezzo (CHF/kW) --- */}
+        
         <Card>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Range prezzo (CHF/kW)</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Range prezzo (CHF/kW)</h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.curve}
+                onChange={(v) => update("locked.curve", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('curve') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('curve')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-5">
             <div className="flex items-center gap-2 md:col-span-5">
               <Checkbox
                 checked={curveEnabled}
                 onChange={setCurveEnabled}
                 label="Abilita range prezzo"
+                disabled={isGroupLocked('curve')}
               />
             </div>
             <Labeled label="Potenza minima (kW)">
@@ -920,6 +1029,7 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseInt(e.target.value);
                   setCurveMinKW(isNaN(v) ? curveMinKW : String(v));
                 }}
+                disabled={isGroupLocked('curve')}
               />
             </Labeled>
             <Labeled label="Prezzo di partenza (CHF/kW @ min)">
@@ -934,6 +1044,7 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseFloat(e.target.value.replace(",", "."));
                   setCurvePriceAtMin(isNaN(v) ? curvePriceAtMin : String(v));
                 }}
+                disabled={isGroupLocked('curve')}
               />
             </Labeled>
             <Labeled label="Soglia alta (kW)">
@@ -948,6 +1059,7 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseInt(e.target.value);
                   setCurveMaxKW(isNaN(v) ? curveMaxKW : String(v));
                 }}
+                disabled={isGroupLocked('curve')}
               />
             </Labeled>
             <Labeled label="Prezzo per impianti ≥ soglia (CHF/kW)">
@@ -962,6 +1074,7 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseFloat(e.target.value.replace(",", "."));
                   setCurvePriceAtMax(isNaN(v) ? curvePriceAtMax : String(v));
                 }}
+                disabled={isGroupLocked('curve')}
               />
             </Labeled>
           </div>
@@ -971,8 +1084,23 @@ function AdminPanel({ settings, setSettings }) {
             &nbsp;·&nbsp;200 kW → {currency(pricePerKWFromCurve(200, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
           </div>
         </Card>
+        
         <Card>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Incentivi (CHF/kW)</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Incentivi (CHF/kW)</h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.incentives}
+                onChange={(v) => update("locked.incentives", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('incentives') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('incentives')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-3">
             <Labeled label="Incentivo federale (CHF/kW)">
               <Input
@@ -986,6 +1114,7 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseFloat(e.target.value.replace(",", "."));
                   setFederalIncentive(isNaN(v) ? federalIncentive : String(v));
                 }}
+                disabled={isGroupLocked('incentives')}
               />
             </Labeled>
             <Labeled label="Incentivo cantonale (CHF/kW)">
@@ -1000,6 +1129,7 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseFloat(e.target.value.replace(",", "."));
                   setCantonalIncentive(isNaN(v) ? cantonalIncentive : String(v));
                 }}
+                disabled={isGroupLocked('incentives')}
               />
             </Labeled>
             <Labeled label="Incentivo comunale (CHF/kW)">
@@ -1014,20 +1144,157 @@ function AdminPanel({ settings, setSettings }) {
                   const v = parseFloat(e.target.value.replace(",", "."));
                   setMunicipalIncentive(isNaN(v) ? municipalIncentive : String(v));
                 }}
+                disabled={isGroupLocked('incentives')}
               />
             </Labeled>
           </div>
           <div className="mt-2 text-xs text-zinc-500">
-            Nota: i valori sono in CHF/kW. L’incentivo comunale è indicativo e altamente variabile; conferma necessaria. Federale e cantonale sono generalmente garantiti.
+            Nota: i valori sono in CHF/kW. L'incentivo comunale è indicativo e altamente variabile; conferma necessaria. Federale e cantonale sono generalmente garantiti.
           </div>
         </Card>
+        
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Autoconsumo & Immissione</h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.energy}
+                onChange={(v) => update("locked.energy", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('energy') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('energy')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <Labeled label="% Autoconsumo con pompa di calore">
+              <Input
+                inputMode="decimal"
+                value={local.pricing.selfConsumptionPctWithHeatPump}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, selfConsumptionPctWithHeatPump: v } }));
+                }}
+                onBlur={e => {
+                  let v = parseFloat(e.target.value.replace(",", "."));
+                  if (isNaN(v)) v = 75;
+                  v = Math.max(0, Math.min(100, v));
+                  setLocal(l => ({
+                    ...l,
+                    pricing: {
+                      ...l.pricing,
+                      selfConsumptionPctWithHeatPump: String(v)
+                    }
+                  }));
+                }}
+                disabled={isGroupLocked('energy')}
+              />
+            </Labeled>
+            <Labeled label="% Autoconsumo senza pompa di calore">
+              <Input
+                inputMode="decimal"
+                value={local.pricing.selfConsumptionPctWithoutHeatPump}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, selfConsumptionPctWithoutHeatPump: v } }));
+                }}
+                onBlur={e => {
+                  let v = parseFloat(e.target.value.replace(",", "."));
+                  if (isNaN(v)) v = 65;
+                  v = Math.max(0, Math.min(100, v));
+                  setLocal(l => ({
+                    ...l,
+                    pricing: {
+                      ...l.pricing,
+                      selfConsumptionPctWithoutHeatPump: String(v)
+                    }
+                  }));
+                }}
+                disabled={isGroupLocked('energy')}
+              />
+            </Labeled>
+            <Labeled label="Prezzo vendita energia (CHF/kWh)">
+              <Input
+                inputMode="decimal"
+                value={local.pricing.exportPriceCHFPerKWh}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, exportPriceCHFPerKWh: v } }));
+                }}
+                onBlur={e => {
+                  const v = parseFloat(e.target.value.replace(",", "."));
+                  setLocal(l => ({
+                    ...l,
+                    pricing: {
+                      ...l.pricing,
+                      exportPriceCHFPerKWh: isNaN(v) ? l.pricing.exportPriceCHFPerKWh : String(v)
+                    }
+                  }));
+                }}
+                disabled={isGroupLocked('energy')}
+              />
+            </Labeled>
+          </div>
+        </Card>
+        
+        <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Parametri Ambientali</h3>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Labeled label="CO₂ risparmiata per kWh (kg)">
+              <Input
+                inputMode="decimal"
+                value={local.environment.co2GridKgPerKWh}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, environment: { ...l.environment, co2GridKgPerKWh: v } }));
+                }}
+                onBlur={e => {
+                  const v = parseFloat(e.target.value.replace(",", "."));
+                  setLocal(l => ({
+                    ...l,
+                    environment: {
+                      ...l.environment,
+                      co2GridKgPerKWh: isNaN(v) ? l.environment.co2GridKgPerKWh : String(v)
+                    }
+                  }));
+                }}
+              />
+            </Labeled>
+            <Labeled label="CO₂ assorbita da un albero all'anno (kg)">
+              <Input
+                inputMode="decimal"
+                value={local.environment.co2PerTreeKgPerYear}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, environment: { ...l.environment, co2PerTreeKgPerYear: v } }));
+                }}
+                onBlur={e => {
+                  const v = parseFloat(e.target.value.replace(",", "."));
+                  setLocal(l => ({
+                    ...l,
+                    environment: {
+                      ...l.environment,
+                      co2PerTreeKgPerYear: isNaN(v) ? l.environment.co2PerTreeKgPerYear : String(v)
+                    }
+                  }));
+                }}
+              />
+            </Labeled>
+          </div>
+        </Card>
+        
         <div className="flex gap-2">
           <Button
             onClick={() => {
               // Normalizza pricing prima di salvare
               const arr = pvSizesText
                 .split(/[;,\s]+/)
-                .map(x => Number(String(x).replace(",", ".")))
+                .map(x => parseFloat(String(x).replace(",", ".")))
                 .filter(x => !isNaN(x) && x > 0);
               const normLocal = JSON.parse(JSON.stringify(local));
               normLocal.pvSizesKW = arr;
@@ -1052,12 +1319,61 @@ function AdminPanel({ settings, setSettings }) {
           </Button>
         </div>
       </div>
+      
+      <PasswordModal
+        isOpen={passwordModal.open}
+        onClose={() => setPasswordModal({ open: false, group: null })}
+        onSuccess={() => handlePasswordSuccess(passwordModal.group)}
+      />
     </motion.div>
   );
 }
 
 function SectionHeader({ title }) {
   return <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{title}</div>;
+}
+
+function OfferSummary({ offer, stima }) {
+  if (!stima || offer.type !== "install") return null;
+  
+  const s = offer.settingsSnapshot;
+  const env = s.environment || DEFAULT_SETTINGS.environment;
+  
+  const co2Saved = stima.prod * (env.co2GridKgPerKWh || 0.12);
+  const equivalentTrees = co2Saved / (env.co2PerTreeKgPerYear || 21);
+  const paybackYears = stima.annualBenefit > 0 ? stima.totalNet / stima.annualBenefit : 0;
+  
+  return (
+    <Card className="mb-6">
+      <SectionHeader title="Riepilogo Impianto Fotovoltaico" />
+      <div className="text-sm space-y-3">
+        <p>
+          L'impianto fotovoltaico proposto ha una potenza di <b>{number(stima.kw, 1)} kW</b> 
+          e produrrà circa <b>{number(stima.prod, 0)} kWh all'anno</b>, equivalenti al consumo 
+          energetico annuo di un'abitazione di medie dimensioni.
+        </p>
+        
+        <p>
+          Grazie alla presenza di {offer.computed.heatPump ? "una pompa di calore" : "un sistema di accumulo"}, 
+          si stima un autoconsumo del <b>{number(stima.autoPct * 100, 0)}%</b> ({number(stima.autoKWh, 0)} kWh), 
+          mentre i rimanenti <b>{number(stima.gridKWh, 0)} kWh</b> verranno immessi in rete, 
+          generando un ulteriore introito.
+        </p>
+        
+        <p>
+          Il beneficio economico annuo stimato è di <b>{currency(stima.annualBenefit)}</b>, 
+          derivante dal risparmio sull'energia autoconsumata ({currency(stima.valueAuto)}) 
+          e dalla vendita dell'energia in eccesso ({currency(stima.valueExport)}). 
+          Il tempo di ritorno dell'investimento è stimato in <b>{number(paybackYears, 1)} anni</b>.
+        </p>
+        
+        <p>
+          Dal punto di vista ambientale, l'impianto eviterà l'emissione di <b>{number(co2Saved, 0)} kg</b> di CO₂ all'anno, 
+          equivalenti all'assorbimento di <b>{number(equivalentTrees, 0)} alberi</b> maturi.
+        </p>
+      </div>
+    </Card>
+  );
 }
 
 function OfferView({ offer, onNew, onEdit }) {
@@ -1072,41 +1388,42 @@ function OfferView({ offer, onNew, onEdit }) {
   let stima = null;
   if (isInstall) {
     const s = offer.settingsSnapshot;
-    const kw = offer.computed.selectedKW || (offer.computed.suggestedSizesKW?.[1] ?? 0);
+    const kw = parseFloat(String(offer.computed.selectedKW).replace(',', '.')) || (offer.computed.suggestedSizesKW?.[1] ?? 0);
     let unit = 0;
     if (s.pricing.curvePricingEnabled) {
       unit = pricePerKWFromCurve(kw, s.pricing.curve);
     } else {
-      unit = Number(s.pricing.systemPricePerKWCHF) || 0;
+      unit = parseFloat(String(s.pricing.systemPricePerKWCHF).replace(',', '.')) || 0;
     }
     const subtotal = kw * unit;
     const discountVal = subtotal * (discountPct / 100);
-    const vatPct = Number(s.pricing.vatPercent) || 0;
+    const vatPct = parseFloat(String(s.pricing.vatPercent).replace(',', '.')) || 0;
     const vat = (subtotal - discountVal) * vatPct / 100;
     const totalBeforeIncentives = subtotal - discountVal + vat;
     const inc = s.pricing.incentives || {};
-    const incFed  = kw * (Number(inc.federalCHFPerKW)   || 0);
-    const incCant = kw * (Number(inc.cantonalCHFPerKW)  || 0);
-    const incMun  = kw * (Number(inc.municipalCHFPerKW) || 0);
+    const incFed  = kw * (parseFloat(String(inc.federalCHFPerKW).replace(',', '.'))   || 0);
+    const incCant = kw * (parseFloat(String(inc.cantonalCHFPerKW).replace(',', '.'))  || 0);
+    const incMun  = kw * (parseFloat(String(inc.municipalCHFPerKW).replace(',', '.')) || 0);
     const totalNet = Math.max(0, totalBeforeIncentives - incFed - incCant - incMun);
 
     // Rendimento energetico stimato
     const prod = (kw || 0) * 1000;
     const autoPct = (
       offer.computed.heatPump
-        ? (Number(s.pricing.selfConsumptionPctWithHeatPump) || 0)
-        : (Number(s.pricing.selfConsumptionPctWithoutHeatPump) || 0)
+        ? (parseFloat(String(s.pricing.selfConsumptionPctWithHeatPump).replace(',', '.')) || 0)
+        : (parseFloat(String(s.pricing.selfConsumptionPctWithoutHeatPump).replace(',', '.')) || 0)
     ) / 100;
     const autoKWh = prod * autoPct;
     const gridKWh = Math.max(0, prod - autoKWh);
-    const buyPrice    = Number(s.pricing.energyPriceCHFPerKWh) || 0;
-    const exportPrice = Number(s.pricing.exportPriceCHFPerKWh) || 0;
+    const buyPrice    = parseFloat(String(s.pricing.energyPriceCHFPerKWh).replace(',', '.')) || 0;
+    const exportPrice = parseFloat(String(s.pricing.exportPriceCHFPerKWh).replace(',', '.')) || 0;
     const valueAuto   = autoKWh * buyPrice;
     const valueExport = gridKWh * exportPrice;
     const annualBenefit = valueAuto + valueExport;
 
     stima = {
-      ...stima,
+      kw, unit, subtotal, discountVal, vatPct, vat, totalBeforeIncentives,
+      incFed, incCant, incMun, totalNet, discountPct,
       prod, autoPct, autoKWh, gridKWh, valueAuto, valueExport, annualBenefit
     };
   }
@@ -1148,6 +1465,57 @@ function OfferView({ offer, onNew, onEdit }) {
       </table>
     </Card>
   );
+
+  const doPrint = () => {
+    window.print();
+  };
+
+  const doExportPdf = async () => {
+    try {
+      // Crea un elemento nascosto per il PDF
+      const pdfElement = document.createElement('div');
+      pdfElement.className = 'pdf-container';
+      pdfElement.style.width = '210mm';
+      pdfElement.style.padding = '10mm';
+      pdfElement.style.margin = '0 auto';
+      pdfElement.style.backgroundColor = 'white';
+      pdfElement.style.color = 'black';
+      
+      // Clona il contenuto della copia cliente
+      const clientCopy = document.querySelector('.client-copy');
+      if (clientCopy) {
+        const clone = clientCopy.cloneNode(true);
+        pdfElement.appendChild(clone);
+      }
+      
+      // Aggiungi al DOM temporaneamente
+      pdfElement.style.position = 'absolute';
+      pdfElement.style.left = '-9999px';
+      document.body.appendChild(pdfElement);
+      
+      // Esporta come PDF
+      await exportOfferToPdf(pdfElement, `offerta-${offer.offerRef}.pdf`);
+      
+      // Salva il PDF nel database
+      const opt = {
+        margin:[10,10,10,10],
+        filename: `offerta-${offer.offerRef}.pdf`,
+        image:{ type:'jpeg', quality:0.98 },
+        html2canvas:{ scale:2, useCORS:true },
+        jsPDF:{ unit:'mm', format:'a4', orientation:'portrait' }
+      };
+      
+      const worker = window.html2pdf().set(opt).from(pdfElement);
+      const blob = await worker.outputPdf('blob');
+      await savePdfToDB(offer.offerRef, blob);
+      
+      // Rimuovi l'elemento temporaneo
+      document.body.removeChild(pdfElement);
+    } catch (error) {
+      console.error('Errore durante esportazione PDF:', error);
+      alert('Si è verificato un errore durante la generazione del PDF');
+    }
+  };
 
   const vendorCopy = (
     <>
@@ -1223,7 +1591,7 @@ function OfferView({ offer, onNew, onEdit }) {
             </table>
             <div className="mt-2">
               <span className="text-xs text-zinc-500">
-                L’incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
+                L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
               </span>
             </div>
           </Card>
@@ -1234,7 +1602,8 @@ function OfferView({ offer, onNew, onEdit }) {
   );
 
   const clientCopy = (
-    <>
+    <div className="client-copy">
+      <OfferSummary offer={offer} stima={stima} />
       <OfferDoc offer={offer} audience="client" />
       {isInstall && (
         <>
@@ -1254,10 +1623,12 @@ function OfferView({ offer, onNew, onEdit }) {
                   <td>Subtotale</td>
                   <td>{currency(stima.subtotal)}</td>
                 </tr>
-                <tr>
-                  <td>Sconto</td>
-                  <td>{currency(stima.discountVal)} ({number(stima.discountPct, 1)}%)</td>
-                </tr>
+                {stima.discountPct > 0 && (
+                  <tr>
+                    <td>Sconto</td>
+                    <td>{currency(stima.discountVal)} ({number(stima.discountPct, 1)}%)</td>
+                  </tr>
+                )}
                 <tr>
                   <td>IVA</td>
                   <td>{number(stima.vatPct, 1)}%</td>
@@ -1286,27 +1657,24 @@ function OfferView({ offer, onNew, onEdit }) {
             </table>
             <div className="mt-2">
               <span className="text-xs text-zinc-500">
-                L’incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
+                L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
               </span>
             </div>
           </Card>
           {rendimentoTable}
         </>
       )}
-    </>
+    </div>
   );
-
-  const doPrint = () => {
-    window.print();
-  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-xl font-semibold">Offerta generata · {date.toLocaleDateString("it-CH")}</h2>
+        <h2 className="text-xl font-semibold">Offerta {offer.offerRef} · {date.toLocaleDateString("it-CH")}</h2>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onEdit}>Modifica dati</Button>
-          <Button icon={Printer} onClick={doPrint}>Stampa / Esporta PDF</Button>
+          <Button icon={Printer} onClick={doPrint}>Stampa</Button>
+          <Button icon={FileText} onClick={doExportPdf}>Esporta PDF</Button>
           <Button variant="ghost" onClick={onNew}>Nuova offerta</Button>
         </div>
       </div>
@@ -1354,9 +1722,7 @@ function OfferDoc({ offer, audience }) {
       <header className="flex items-start justify-between gap-6">
         <div>
           <div className="flex items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 font-bold text-white dark:bg-blue-500">
-              {s.company.logoText}
-            </div>
+            <img src="/img/logoedil.png" alt="Edil Repairs" className="h-10 w-auto object-contain" />
             <div>
               <div className="text-base font-semibold">{s.company.name}</div>
               <div className="text-xs text-zinc-500">{s.company.address} · {s.company.phone} · {s.company.email}</div>
@@ -1373,7 +1739,7 @@ function OfferDoc({ offer, audience }) {
           <div className="text-xs text-zinc-500">Data</div>
           <div className="font-medium">{new Date(offer.createdAt).toLocaleDateString("it-CH")}</div>
           <div className="mt-2 text-xs text-zinc-500">Rif. offerta</div>
-          <div className="font-mono text-[13px]">FV-{new Date(offer.createdAt).getTime()}</div>
+          <div className="font-mono text-[13px]">{offer.offerRef}</div>
         </div>
       </header>
 
@@ -1456,6 +1822,125 @@ function OfferDoc({ offer, audience }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ArchiveView({ onSelectOffer }) {
+  const [offers, setOffers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadOffers();
+  }, []);
+
+  const loadOffers = async () => {
+    try {
+      const offerList = await listOffersFromDB();
+      setOffers(offerList);
+    } catch (error) {
+      console.error('Errore nel caricamento offerte:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteOffer = async (offerRef) => {
+    if (window.confirm('Sei sicuro di voler eliminare questa offerta?')) {
+      await deleteOfferFromDB(offerRef);
+      await loadOffers();
+    }
+  };
+
+  const handleDownloadJson = async (offerRef) => {
+    try {
+      const offer = await getOfferFromDB(offerRef);
+      const dataStr = JSON.stringify(offer, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      
+      const exportFileDefaultName = `prg/${offerRef}.json`;
+      
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+    } catch (error) {
+      console.error('Errore nel download JSON:', error);
+      alert('Errore nel download del file JSON');
+    }
+  };
+
+  const handleDownloadPdf = async (offerRef) => {
+    try {
+      const pdfBlob = await getPdfFromDB(offerRef);
+      if (!pdfBlob) {
+        alert('Nessun PDF trovato per questa offerta');
+        return;
+      }
+      
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `prg-pdf/${offerRef}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Errore nel download PDF:', error);
+      alert('Errore nel download del file PDF');
+    }
+  };
+
+  if (loading) {
+    return <div className="text-center py-8">Caricamento archivio...</div>;
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Archivio Offerte</h1>
+        <Button onClick={loadOffers}>Aggiorna</Button>
+      </div>
+
+      {offers.length === 0 ? (
+        <Card>
+          <div className="text-center py-8 text-zinc-500">
+            Nessuna offerta salvata nell'archivio
+          </div>
+        </Card>
+      ) : (
+        <div className="grid gap-4">
+          {offers.map((offer) => (
+            <Card key={offer.offerRef}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-semibold">{offer.offerRef}</h3>
+                  <p className="text-sm text-zinc-500">
+                    {new Date(offer.createdAt).toLocaleDateString('it-CH')} · 
+                    {offer.type === 'install' ? ' Nuovo impianto' : ' Manutenzione'} · 
+                    {offer.customer.firstName} {offer.customer.lastName}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="subtle" size="sm" onClick={() => onSelectOffer(offer)}>
+                    Apri
+                  </Button>
+                  <Button variant="subtle" size="sm" onClick={() => handleDownloadJson(offer.offerRef)}>
+                    Scarica JSON
+                  </Button>
+                  <Button variant="subtle" size="sm" onClick={() => handleDownloadPdf(offer.offerRef)}>
+                    Scarica PDF
+                  </Button>
+                  <Button variant="subtle" size="sm" onClick={() => handleDeleteOffer(offer.offerRef)}>
+                    Elimina
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </motion.div>
   );
 }
 
