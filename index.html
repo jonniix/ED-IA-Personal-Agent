@@ -1,13 +1,15 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pv Event Toolkit</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ED-IA Personal Agent</title>
+    <!-- usa il base URL di Vite -->
+    <link rel="icon" href="%BASE_URL%favicon.ico" />
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <!-- main.jsx è IN ROOT, non in /src -->
+    <script type="module" src="%BASE_URL%main.jsx"></script>
   </body>
 </html>
