@@ -23,9 +23,14 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-      - run: npm ci
+      - name: Install deps
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-fund --no-audit
+          fi
       - run: npm run build
-      # fallback per SPA (evita 404 su refresh)
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -40,4 +45,3 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
-
