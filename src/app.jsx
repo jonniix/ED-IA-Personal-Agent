@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer, Archive } from "lucide-react";
-import { exportOfferToPdf } from "./pdf/exportPdf";
+import html2pdf from "html2pdf.js";
 import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "./lib/db";
 
 // --- Utility helpers ---
@@ -383,7 +383,7 @@ function TopBar({ theme, setTheme, route, setRoute, company }) {
     <div className="sticky top-0 z-20 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-3">
-          <img src="/img/logoedil.png" alt="Edil Repairs" className="h-8 w-auto object-contain" />
+          <img src={import.meta.env.BASE_URL + "img/logoedil.png"} alt="Edil Repairs" className="h-8 w-auto object-contain" />
           <div>
             <div className="text-sm font-semibold leading-4">{company.name}</div>
             <div className="text-xs text-zinc-500">Edil Repairs Artificial Intelligence</div>
@@ -656,7 +656,7 @@ function MaintenanceForm({ form, setForm, settings, onCreate }) {
           </div>
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/50 dark:bg-emerald-900/20">
             Anteprima totale (nascosta al cliente durante compilazione): <b>{currency(gross)}</b>
-          </div>
+            </div>
           <div className="flex flex-wrap gap-2">
             <Button icon={FileText} onClick={onCreate}>Genera offerta</Button>
             <Button variant="ghost" onClick={() => window.history.back?.()}>Annulla</Button>
@@ -765,7 +765,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
     norm.incentives = {
       federalCHFPerKW: parseField(federalIncentive, settings.pricing.incentives?.federalCHFPerKW ?? 360),
       cantonalCHFPerKW: parseField(cantonalIncentive, settings.pricing.incentives?.cantonalCHFPerKW ?? 180),
-      municipalCHFPerKW: parseField(municipalIncentive, settings.pricing.incentives?.municipalCHFPerKW ?? 10),
+      municipalCHFPerKW: parseField(municipalInceptives, settings.pricing.incentives?.municipalCHFPerKW ?? 10),
     };
     // Autoconsumo & Immissione (clamp 0-100 sulle %)
     norm.selfConsumptionPctWithHeatPump = Math.max(0, Math.min(100, parseFloat(String(norm.selfConsumptionPctWithHeatPump).replace(',', '.')) || 0));
@@ -777,7 +777,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
   // Normalizza curve su blur/salva
   const normalizeCurve = (curve) => {
     return {
-      minKW: parseInt(curveMinKW) || 8,
+      minKW: parseInt(curcurveMinKW) || 8,
       priceAtMin: parseFloat(String(curvePriceAtMin).replace(",", ".")) || 2000,
       maxKW: parseInt(curveMaxKW) || 200,
       priceAtMax: parseFloat(String(curvePriceAtMax).replace(",", ".")) || 1000,
@@ -1027,7 +1027,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
                 }}
                 onBlur={e => {
                   const v = parseInt(e.target.value);
-                  setCurveMinKW(isNaN(v) ? curveMinKW : String(v));
+                  setCurcurveMinKW(isNaN(v) ? curveMinKW : String(v));
                 }}
                 disabled={isGroupLocked('curve')}
               />
@@ -1080,7 +1080,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
           </div>
           <div className="mt-2 text-xs text-zinc-500">
             8 kW → {currency(pricePerKWFromCurve(8, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
-            &nbsp;·&nbsp;50 kW → {currency(pricePerKWFromCurve(50, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
+            &nbsp;·&nbsp;50 kW → {currency(pricePerKWFromCurcurve(50, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
             &nbsp;·&nbsp;200 kW → {currency(pricePerKWFromCurve(200, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
           </div>
         </Card>
@@ -1154,6 +1154,23 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
         </Card>
         
         <Card>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Autoconsumo & Immissione</h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.energy}
+                onChange={(v) => update("locked.energy", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('energy') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('energy')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-c
+             <Card>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Autoconsumo & Immissione</h3>
             <div className="flex items-center gap-2">
@@ -1458,7 +1475,7 @@ function OfferView({ offer, onNew, onEdit }) {
             <td>{currency(stima.valueExport)}</td>
           </tr>
           <tr>
-            <td className="font-semibold">Beneficio annuo stimato</td>
+            <td className="font-semibold">Beneficio annuo estimato</td>
             <td className="font-semibold">{currency(stima.annualBenefit)}</td>
           </tr>
         </tbody>
@@ -1494,19 +1511,20 @@ function OfferView({ offer, onNew, onEdit }) {
       document.body.appendChild(pdfElement);
       
       // Esporta come PDF
-      await exportOfferToPdf(pdfElement, `offerta-${offer.offerRef}.pdf`);
-      
-      // Salva il PDF nel database
       const opt = {
-        margin:[10,10,10,10],
+        margin: [10, 10, 10, 10],
         filename: `offerta-${offer.offerRef}.pdf`,
-        image:{ type:'jpeg', quality:0.98 },
-        html2canvas:{ scale:2, useCORS:true },
-        jsPDF:{ unit:'mm', format:'a4', orientation:'portrait' }
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       };
       
-      const worker = window.html2pdf().set(opt).from(pdfElement);
+      const worker = html2pdf().set(opt).from(pdfElement);
       const blob = await worker.outputPdf('blob');
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      
+      // Salva il PDF nel database
       await savePdfToDB(offer.offerRef, blob);
       
       // Rimuovi l'elemento temporaneo
@@ -1722,7 +1740,7 @@ function OfferDoc({ offer, audience }) {
       <header className="flex items-start justify-between gap-6">
         <div>
           <div className="flex items-center gap-2">
-            <img src="/img/logoedil.png" alt="Edil Repairs" className="h-10 w-auto object-contain" />
+            <img src={import.meta.env.BASE_URL + "img/logoedil.png"} alt="Edil Repairs" className="h-10 w-auto object-contain" />
             <div>
               <div className="text-base font-semibold">{s.company.name}</div>
               <div className="text-xs text-zinc-500">{s.company.address} · {s.company.phone} · {s.company.email}</div>
@@ -1917,7 +1935,8 @@ function ArchiveView({ onSelectOffer }) {
                   <h3 className="font-semibold">{offer.offerRef}</h3>
                   <p className="text-sm text-zinc-500">
                     {new Date(offer.createdAt).toLocaleDateString('it-CH')} · 
-                    {offer.type === 'install' ? ' Nuovo impianto' : ' Manutenzione'} · 
+                    {offer.type === 'install'
+                             {offer.type === 'install' ? ' Nuovo impianto' : ' Manutenzione'} · 
                     {offer.customer.firstName} {offer.customer.lastName}
                   </p>
                 </div>
