@@ -28,10 +28,10 @@ function nextOfferRef() {
 const DEFAULT_SETTINGS = {
   company: {
     name: "Edil Repairs Sagl",
-    logoText: "FV+",
-    address: "Via Sole 1, 6900 Lugano",
-    phone: "+41 00 000 00 00",
-    email: "info@edil-repairs.ch",
+    logoText: "i.Solar",
+    address: "Viale Officina 21, 6500 Bellinzona",
+    phone: "+41 91 835 50 80",
+    email: "info@edilrepairs.ch",
   },
   pricing: {
     energyPriceCHFPerKWh: 0.28,
@@ -50,16 +50,20 @@ const DEFAULT_SETTINGS = {
       cantonalCHFPerKW: 180,
       municipalCHFPerKW: 10,
     },
-    selfConsumptionPctWithHeatPump: 75,
-    selfConsumptionPctWithoutHeatPump: 65,
+    selfConsumptionPctWithHeatPump: 70,
+    selfConsumptionPctWithoutHeatPump: 60,
     exportPriceCHFPerKWh: 0.05,
   },
   environment: {
     co2GridKgPerKWh: 0.12,
     co2PerTreeKgPerYear: 21
   },
-  pvSizesKW: [8, 10, 12, 16, 25, 33],
-  // Mini mappa CAP->Comune (estendibile in Admin). L'utente può sempre sovrascrivere manualmente.
+  pvSizesKW: [8, 10, 12, 14, 16, 25, 35, 50, 70, 100, 135, 200],
+  wallboxPricing: {
+    base: { presa: 200, standard: 850, smart: 1200 },
+    powerAddon: { "11": 0, "22": 250 },
+    distanceBand: { "0-5": 150, "5-10": 250, "10-25": 450, "25-50": 800 }
+  },
   capToCity: {
     "6500": "Bellinzona",
     "6600": "Locarno",
@@ -71,12 +75,81 @@ const DEFAULT_SETTINGS = {
     "3000": "Bern",
     "4051": "Basel",
   },
+  ai: {
+    calloutFixedCHF: 135,
+    billTravelAs: "fixed",
+    travelCHFPerMinute: 2.0,
+    defaultOneWayTravelMinutes: 20,
+    roundLaborToQuarterHour: true,
+    electricianCHFh: 95,
+    apprenticeCHFh: 55,
+    vatPercentOverride: null,
+    timePerTaskMinutes: {
+      "Illuminazione": { base: 20, ext: 10, pareteExtra: 5 },
+      "Prese/Interruttori": { basePerPresa: 30, dimmerExtra: 10 },
+      "Quadro Elettrico": { adeguamento: 120, sostituzione: 240, linea: 60 },
+      "Citofonia/Video": { citofono: 90, videocitofono: 120 },
+      "Rete Dati": { presa: 30, accessPoint: 45, rack: 60 },
+      "EV/Wallbox": { sopralluogo: 45, posa: 120 },
+      "Altro": { base: 60 }
+    },
+    materialCatalog: {
+      "Illuminazione": [
+        { key:"plafoniera_semplice", descr:"Plafoniera LED semplice", unitCHF:65 },
+        { key:"plafoniera_esterno",  descr:"Plafoniera IP65 esterno", unitCHF:95 }
+      ],
+      "Prese/Interruttori": [
+        { key:"presa_schuko", descr:"Presa Schuko 16A", unitCHF:12 },
+        { key:"interruttore", descr:"Interruttore 1P",  unitCHF:10 },
+        { key:"dimmer",       descr:"Dimmer luce",      unitCHF:45 }
+      ],
+      "EV/Wallbox": [
+        { key:"wb_standard", descr:"Wallbox standard", unitCHF:850 },
+        { key:"wb_smart",    descr:"Wallbox smart",    unitCHF:1250 }
+      ]
+    }
+  },
+  aiConfig: {
+    companyHQ: "Viale Officina 21, 6500 Bellinzona, Ticino",
+    rates: {
+      hourlyWorker: 95,
+      hourlyApprentice: 55,
+      calloutFee: 135,
+      travelRatePerMinute: 0
+    },
+    taskTimesMin: {
+      plafoniera: 20,
+      applique: 18,
+      farettiIncasso: 25,
+      presa: 15,
+      interruttore: 12,
+      dimmer: 18,
+      citofono: 60,
+      videocitofono: 90,
+      lineaDatiRJ45: 30
+    },
+    materialsCHF: {
+      plafonieraSemplice: 80,
+      presaSchuko: 18,
+      interruttore: 14,
+      dimmer: 45,
+      cavoAlMetro: 2.2,
+      minuteraForfait: 12
+    },
+    defaults: {
+      travelMinutesOneWayLocal: 15,
+      travelMinutesOneWayExtra: 35
+    },
+    autoApplyCallout: true // <--- nuovo toggle
+  },
   locked: {
     company: false,
     pricing: false,
     curve: false,
     incentives: false,
-    energy: false
+    energy: false,
+    wallbox: false,
+    ai: false
   }
 };
 
@@ -85,7 +158,6 @@ const loadSettings = () => {
     const raw = localStorage.getItem("pv_event_toolkit_settings");
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
-    // shallow merge defaults for safety
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
@@ -94,6 +166,9 @@ const loadSettings = () => {
       environment: { ...DEFAULT_SETTINGS.environment, ...(parsed.environment || {}) },
       capToCity: { ...DEFAULT_SETTINGS.capToCity, ...(parsed.capToCity || {}) },
       pvSizesKW: parsed.pvSizesKW || DEFAULT_SETTINGS.pvSizesKW,
+      wallboxPricing: { ...DEFAULT_SETTINGS.wallboxPricing, ...(parsed.wallboxPricing || {}) },
+      ai: { ...DEFAULT_SETTINGS.ai, ...(parsed.ai || {}) },
+      aiConfig: { ...DEFAULT_SETTINGS.aiConfig, ...(parsed.aiConfig || {}) },
       locked: { ...DEFAULT_SETTINGS.locked, ...(parsed.locked || {}) }
     };
   } catch (e) {
@@ -125,7 +200,7 @@ function pricePerKWFromCurve(kw, curve){
 // --- Core App ---
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("pv_theme") || "dark");
-  const [route, setRoute] = useState("home"); // home | new | maint | admin | offer | archive
+  const [route, setRoute] = useState("home"); // home | new | maint | admin | offer | archive | wallbox | ai
   const [settings, setSettings] = useState(loadSettings);
   const [installForm, setInstallForm] = useState({
     firstName: "",
@@ -148,12 +223,26 @@ export default function App() {
     panels: "",
     extraNotes: "",
   });
+  const [wallboxForm, setWallboxForm] = useState({
+    firstName: "",
+    lastName: "",
+    street: "",
+    cap: "",
+    city: "",
+    country: "Svizzera",
+    phone: "",
+    email: "",
+    chargerKW: "11",
+    distanceBand: "0-5",
+    chargerType: "presa"
+  });
 
   const [offer, setOffer] = useState(loadOffer());
   const [unlockedGroups, setUnlockedGroups] = useState(() => {
     const stored = sessionStorage.getItem('pv_unlocked_groups');
     return stored ? JSON.parse(stored) : {};
   });
+  const [aiOpenOffer, setAiOpenOffer] = useState(null);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -168,12 +257,13 @@ export default function App() {
     }
   }, [installForm.cap, settings.capToCity]);
 
+  // Auto-lookup City from CAP
   useEffect(() => {
-    const cap = maintForm.cap?.trim();
+    const cap = wallboxForm.cap?.trim();
     if (cap && settings.capToCity[cap]) {
-      setMaintForm((f) => ({ ...f, city: settings.capToCity[cap] }));
+      setWallboxForm((f) => ({ ...f, city: settings.capToCity[cap] }));
     }
-  }, [maintForm.cap, settings.capToCity]);
+  }, [wallboxForm.cap, settings.capToCity]);
 
   const suggestSizes = (kWh) => {
     const targetKW = Math.max(0, Number(kWh || 0) / 1000); // ~1kWp ≈ 1MWh/anno
@@ -247,6 +337,27 @@ export default function App() {
     setRoute("offer");
   };
 
+  // Funzione per creare offerta Wallbox
+  const buildWallboxOffer = () => {
+    const offerRef = nextOfferRef();
+    const payload = {
+      type: "wallbox",
+      offerRef,
+      createdAt: new Date().toISOString(),
+      customer: wallboxForm,
+      computed: {
+        chargerKW: Number(wallboxForm.chargerKW || 11),
+        distanceBand: wallboxForm.distanceBand,
+        chargerType: wallboxForm.chargerType
+        // prezzi/calcoli arriveranno nel Passo 3
+      },
+      settingsSnapshot: settings,
+    };
+    setOffer(payload);
+    saveOffer(payload);
+    setRoute("offer");
+  };
+
   const resetAll = () => {
     setInstallForm({
       firstName: "",
@@ -269,6 +380,34 @@ export default function App() {
     setUnlockedGroups(newUnlocked);
     sessionStorage.setItem('pv_unlocked_groups', JSON.stringify(newUnlocked));
   };
+
+  // Handler per aprire bozza AI dall'archivio o home
+  function handleSelectOffer(offer) {
+    if (offer.type === "service") {
+      setAiOpenOffer(offer);
+      setRoute("ai");
+    } else {
+      setOffer(offer);
+      saveOffer(offer);
+      setRoute("offer");
+    }
+  }
+
+  useEffect(() => {
+    if (route === "ai_open_last") {
+      // Cerca ultima bozza AI
+      listOffersFromDB().then(list => {
+        const last = [...list].reverse().find(o => o.type === "service");
+        if (last) {
+          setAiOpenOffer(last);
+          setRoute("ai");
+        } else {
+          alert("Nessuna bozza AI trovata.");
+          setRoute("home");
+        }
+      });
+    }
+  }, [route]);
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -303,14 +442,19 @@ export default function App() {
           />
         )}
         {route === "archive" && (
-          <ArchiveView 
-            onSelectOffer={(offer) => {
-              setOffer(offer);
-              saveOffer(offer);
-              setRoute("offer");
-            }}
+          <ArchiveView
+            onSelectOffer={handleSelectOffer}
           />
         )}
+        {route === "wallbox" && (
+          <WallboxForm
+            form={wallboxForm}
+            setForm={setWallboxForm}
+            settings={settings}
+            onCreate={buildWallboxOffer}
+          />
+        )}
+        {route === "ai" && <TriageAssistant setRoute={setRoute} openOffer={aiOpenOffer} />}
       </main>
 
       <Footer company={settings.company} />
@@ -416,6 +560,7 @@ function HomeScreen({ setRoute, company }) {
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
+        {/* Card FV */}
         <Card>
           <div className="flex items-start justify-between">
             <div>
@@ -433,6 +578,7 @@ function HomeScreen({ setRoute, company }) {
             <Button variant="ghost" onClick={() => setRoute("offer")}>Apri ultima offerta</Button>
           </div>
         </Card>
+        {/* Card Manutenzione */}
         <Card>
           <div className="flex items-start justify-between">
             <div>
@@ -447,6 +593,41 @@ function HomeScreen({ setRoute, company }) {
           </div>
           <div className="mt-4">
             <Button icon={Wrench} onClick={() => setRoute("maint")}>Avvia</Button>
+          </div>
+        </Card>
+        {/* Card Wallbox */}
+        <Card>
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Wallbox</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                Offerta per installazione Wallbox di ricarica veicoli elettrici.
+              </p>
+            </div>
+            <div className="rounded-xl bg-purple-600/10 p-3 text-purple-600 dark:text-purple-400">
+              <PlugZap />
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button icon={PlugZap} onClick={() => setRoute("wallbox")}>Avvia</Button>
+          </div>
+        </Card>
+        {/* Card AI Preventivi */}
+        <Card>
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Assistente AI (preventivo rapido)</h2>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                Preventivo rapido con stima tempi, materiali e viaggio. Nessuna chiamata esterna.
+              </p>
+            </div>
+            <div className="rounded-xl bg-fuchsia-600/10 p-3 text-fuchsia-600 dark:text-fuchsia-400">
+              <Settings />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <Button icon={Settings} onClick={() => setRoute("ai")}>Avvia</Button>
+            <Button variant="ghost" onClick={() => setRoute("ai_open_last")}>Apri ultima bozza</Button>
           </div>
         </Card>
       </div>
@@ -722,6 +903,68 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
     s.pricing.exportPriceCHFPerKWh = String(s.pricing.exportPriceCHFPerKWh ?? "");
     s.environment.co2GridKgPerKWh = String(s.environment.co2GridKgPerKWh ?? "");
     s.environment.co2PerTreeKgPerYear = String(s.environment.co2PerTreeKgPerYear ?? "");
+    // Wallbox prezzi: string-first
+    if (!s.wallboxPricing) s.wallboxPricing = { base: {}, powerAddon: {}, distanceBand: {} };
+    s.wallboxPricing.base.presa = String(s.wallboxPricing.base?.presa ?? 200);
+    s.wallboxPricing.base.standard = String(s.wallboxPricing.base?.standard ?? 850);
+    s.wallboxPricing.base.smart = String(s.wallboxPricing.base?.smart ?? 1200);
+    s.wallboxPricing.powerAddon["11"] = String(s.wallboxPricing.powerAddon?.["11"] ?? 0);
+    s.wallboxPricing.powerAddon["22"] = String(s.wallboxPricing.powerAddon?.["22"] ?? 250);
+    s.wallboxPricing.distanceBand["0-5"] = String(s.wallboxPricing.distanceBand?.["0-5"] ?? 150);
+    s.wallboxPricing.distanceBand["5-10"] = String(s.wallboxPricing.distanceBand?.["5-10"] ?? 250);
+    s.wallboxPricing.distanceBand["10-25"] = String(s.wallboxPricing.distanceBand?.["10-25"] ?? 450);
+    s.wallboxPricing.distanceBand["25-50"] = String(s.wallboxPricing.distanceBand?.["25-50"] ?? 800);
+    // AI: string-first
+    if (!s.ai) s.ai = {};
+    s.ai.calloutFixedCHF = String(s.ai.calloutFixedCHF ?? 135);
+    s.ai.billTravelAs = s.ai.billTravelAs ?? "fixed";
+    s.ai.travelCHFPerMinute = String(s.ai.travelCHFPerMinute ?? 2.0);
+    s.ai.defaultOneWayTravelMinutes = String(s.ai.defaultOneWayTravelMinutes ?? 20);
+    s.ai.roundLaborToQuarterHour = !!s.ai.roundLaborToQuarterHour;
+    s.ai.electricianCHFh = String(s.ai.electricianCHFh ?? 95);
+    s.ai.apprenticeCHFh = String(s.ai.apprenticeCHFh ?? 55);
+    s.ai.vatPercentOverride = s.ai.vatPercentOverride !== null ? String(s.ai.vatPercentOverride) : "";
+    // timePerTaskMinutes: string-first
+    Object.entries(DEFAULT_SETTINGS.ai.timePerTaskMinutes).forEach(([cat, obj]) => {
+      if (!s.ai.timePerTaskMinutes) s.ai.timePerTaskMinutes = {};
+      if (!s.ai.timePerTaskMinutes[cat]) s.ai.timePerTaskMinutes[cat] = {};
+      Object.entries(obj).forEach(([k, v]) => {
+        s.ai.timePerTaskMinutes[cat][k] = String(s.ai.timePerTaskMinutes[cat]?.[k] ?? v);
+      });
+    });
+    // materialCatalog: string-first
+    Object.entries(DEFAULT_SETTINGS.ai.materialCatalog).forEach(([cat, arr]) => {
+      if (!s.ai.materialCatalog) s.ai.materialCatalog = {};
+      if (!s.ai.materialCatalog[cat]) s.ai.materialCatalog[cat] = [];
+      s.ai.materialCatalog[cat] = arr.map((mat, idx) => {
+        const existing = s.ai.materialCatalog[cat][idx] || {};
+        return {
+          key: existing.key ?? mat.key,
+          descr: existing.descr ?? mat.descr,
+          unitCHF: String(existing.unitCHF ?? mat.unitCHF)
+        };
+      });
+    });
+    // aiConfig: string-first
+    if (!s.aiConfig) s.aiConfig = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.aiConfig));
+    s.aiConfig.companyHQ = s.aiConfig.companyHQ ?? DEFAULT_SETTINGS.aiConfig.companyHQ;
+    Object.entries(DEFAULT_SETTINGS.aiConfig.rates).forEach(([k, v]) => {
+      if (!s.aiConfig.rates) s.aiConfig.rates = {};
+      s.aiConfig.rates[k] = String(s.aiConfig.rates?.[k] ?? v);
+    });
+    Object.entries(DEFAULT_SETTINGS.aiConfig.taskTimesMin).forEach(([k, v]) => {
+      if (!s.aiConfig.taskTimesMin) s.aiConfig.taskTimesMin = {};
+      s.aiConfig.taskTimesMin[k] = String(s.aiConfig.taskTimesMin?.[k] ?? v);
+    });
+    Object.entries(DEFAULT_SETTINGS.aiConfig.materialsCHF).forEach(([k, v]) => {
+      if (!s.aiConfig.materialsCHF) s.aiConfig.materialsCHF = {};
+      s.aiConfig.materialsCHF[k] = String(s.aiConfig.materialsCHF?.[k] ?? v);
+    });
+    Object.entries(DEFAULT_SETTINGS.aiConfig.defaults).forEach(([k, v]) => {
+      if (!s.aiConfig.defaults) s.aiConfig.defaults = {};
+      s.aiConfig.defaults[k] = String(s.aiConfig.defaults?.[k] ?? v);
+    });
+    if (typeof s.aiConfig.autoApplyCallout === "undefined") s.aiConfig.autoApplyCallout = true;
     return s;
   });
 
@@ -781,6 +1024,73 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
       maxKW: parseInt(curveMaxKW) || 200,
       priceAtMax: parseFloat(String(curvePriceAtMax).replace(",", ".")) || 1000,
     };
+  };
+
+  // Normalizza wallboxPricing su blur/salva
+  const normalizeWallboxPricing = (wallboxPricing) => {
+    const norm = { base: {}, powerAddon: {}, distanceBand: {} };
+    norm.base.presa = parseFloat(String(wallboxPricing.base.presa).replace(",", ".")) || 0;
+    norm.base.standard = parseFloat(String(wallboxPricing.base.standard).replace(",", ".")) || 0;
+    norm.base.smart = parseFloat(String(wallboxPricing.base.smart).replace(",", ".")) || 0;
+    norm.powerAddon["11"] = parseFloat(String(wallboxPricing.powerAddon["11"]).replace(",", ".")) || 0;
+    norm.powerAddon["22"] = parseFloat(String(wallboxPricing.powerAddon["22"]).replace(",", ".")) || 0;
+    norm.distanceBand["0-5"] = parseFloat(String(wallboxPricing.distanceBand["0-5"]).replace(",", ".")) || 0;
+    norm.distanceBand["5-10"] = parseFloat(String(wallboxPricing.distanceBand["5-10"]).replace(",", ".")) || 0;
+    norm.distanceBand["10-25"] = parseFloat(String(wallboxPricing.distanceBand["10-25"]).replace(",", ".")) || 0;
+    norm.distanceBand["25-50"] = parseFloat(String(wallboxPricing.distanceBand["25-50"]).replace(",", ".")) || 0;
+    return norm;
+  };
+
+  // Normalizza ai su blur/salva
+  const normalizeAi = (ai) => {
+    const norm = { ...ai };
+    norm.calloutFixedCHF = parseFloat(String(ai.calloutFixedCHF).replace(",", ".")) || 0;
+    norm.billTravelAs = ai.billTravelAs || "fixed";
+    norm.travelCHFPerMinute = parseFloat(String(ai.travelCHFPerMinute).replace(",", ".")) || 0;
+    norm.defaultOneWayTravelMinutes = parseFloat(String(ai.defaultOneWayTravelMinutes).replace(",", ".")) || 0;
+    norm.roundLaborToQuarterHour = !!ai.roundLaborToQuarterHour;
+    norm.electricianCHFh = parseFloat(String(ai.electricianCHFh).replace(",", ".")) || 0;
+    norm.apprenticeCHFh = parseFloat(String(ai.apprenticeCHFh).replace(",", ".")) || 0;
+    norm.vatPercentOverride = ai.vatPercentOverride !== "" && ai.vatPercentOverride !== null
+      ? parseFloat(String(ai.vatPercentOverride).replace(",", ".")) : null;
+    // timePerTaskMinutes
+    Object.entries(ai.timePerTaskMinutes || {}).forEach(([cat, obj]) => {
+      Object.entries(obj).forEach(([k, v]) => {
+        norm.timePerTaskMinutes[cat][k] = parseFloat(String(v).replace(",", ".")) || 0;
+      });
+    });
+    // materialCatalog
+    Object.entries(ai.materialCatalog || {}).forEach(([cat, arr]) => {
+      norm.materialCatalog[cat] = arr.map(mat => ({
+        key: mat.key,
+        descr: mat.descr,
+        unitCHF: parseFloat(String(mat.unitCHF).replace(",", ".")) || 0
+      }));
+    });
+    return norm;
+  };
+
+  // Normalizza aiConfig su blur/salva
+  const normalizeAiConfig = (aiConfig) => {
+    const norm = { ...aiConfig };
+    norm.companyHQ = aiConfig.companyHQ ?? DEFAULT_SETTINGS.aiConfig.companyHQ;
+    norm.rates = {};
+    Object.entries(aiConfig.rates || {}).forEach(([k, v]) => {
+      norm.rates[k] = parseFloat(String(v).replace(",", ".")) || 0;
+    });
+    norm.taskTimesMin = {};
+    Object.entries(aiConfig.taskTimesMin || {}).forEach(([k, v]) => {
+      norm.taskTimesMin[k] = parseFloat(String(v).replace(",", ".")) || 0;
+    });
+    norm.materialsCHF = {};
+    Object.entries(aiConfig.materialsCHF || {}).forEach(([k, v]) => {
+      norm.materialsCHF[k] = parseFloat(String(v).replace(",", ".")) || 0;
+    });
+    norm.defaults = {};
+    Object.entries(aiConfig.defaults || {}).forEach(([k, v]) => {
+      norm.defaults[k] = parseFloat(String(v).replace(",", ".")) || 0;
+    });
+    return norm;
   };
 
   const update = (path, value) => {
@@ -1300,9 +1610,14 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
               normLocal.pricing = normalizePricing(normLocal.pricing);
               normLocal.pricing.curvePricingEnabled = curveEnabled;
               normLocal.pricing.curve = normalizeCurve(normLocal.pricing.curve);
+              normLocal.wallboxPricing = normalizeWallboxPricing(normLocal.wallboxPricing);
+              normLocal.ai = normalizeAi(normLocal.ai);
+              normLocal.aiConfig = normalizeAiConfig(normLocal.aiConfig);
               setSettings(normLocal);
               saveSettings(normLocal);
             }}
+         
+
           >
             Salva impostazioni
           </Button>
@@ -1379,6 +1694,9 @@ function OfferView({ offer, onNew, onEdit }) {
   const ref = useRef(null);
   const date = new Date(offer.createdAt);
   const isInstall = offer.type === "install";
+  // --- ADD: wallbox summary ---
+  const isWallbox = offer.type === "wallbox";
+  const isAI = offer.type === "ai";
 
   // Sconto solo per venditore
   const [discountPct, setDiscountPct] = useState(0);
@@ -1424,6 +1742,36 @@ function OfferView({ offer, onNew, onEdit }) {
       kw, unit, subtotal, discountVal, vatPct, vat, totalBeforeIncentives,
       incFed, incCant, incMun, totalNet, discountPct,
       prod, autoPct, autoKWh, gridKWh, valueAuto, valueExport, annualBenefit
+    };
+  }
+
+  // Calcolo stima economica Wallbox
+  let stimaWB = null;
+  if (isWallbox) {
+    const s = offer.settingsSnapshot;
+    const kw = Number(offer.computed.chargerKW);
+    const dist = offer.computed.distanceBand;
+    const typ = offer.computed.chargerType;
+    const wb = s.wallboxPricing || DEFAULT_SETTINGS.wallboxPricing;
+    const base = parseFloat(String(wb.base?.[typ]).replace(",", ".")) || 0;
+    const addon = parseFloat(String(wb.powerAddon?.[String(kw)]).replace(",", ".")) || 0;
+    const install = parseFloat(String(wb.distanceBand?.[dist]).replace(",", ".")) || 0;
+    const subtotal = base + addon + install;
+    const vatPct = parseFloat(String(s.pricing?.vatPercent).replace(",", ".")) || 0;
+    const vat = subtotal * vatPct / 100;
+    const total = subtotal + vat;
+    stimaWB = { base, addon, install, subtotal, vatPct, vat, total, typ, kw, dist };
+  }
+
+  // Calcolo stima economica AI
+  let stimaAI = null;
+  if (isAI && offer.aiEstimate) {
+    const est = offer.aiEstimate;
+    stimaAI = {
+      rows: est.rows,
+      travel: est.travel,
+      labor: est.labor,
+      totals: est.totals
     };
   }
 
@@ -1517,6 +1865,151 @@ function OfferView({ offer, onNew, onEdit }) {
     }
   };
 
+  // --- vendorCopy/clientCopy: Wallbox prezzi ---
+  const wallboxTable = stimaWB && (
+    <Card className="mt-6">
+      <SectionHeader title="Stima economica Wallbox" />
+      <table className="w-full text-sm">
+        <tbody>
+          <tr>
+            <td>Hardware ({stimaWB.typ === "presa" ? "Presa semplice" : stimaWB.typ === "standard" ? "Wallbox standard" : "Wallbox smart"})</td>
+            <td>{currency(stimaWB.base)}</td>
+          </tr>
+          <tr>
+            <td>Differenza potenza ({stimaWB.kw} kW)</td>
+            <td>{currency(stimaWB.addon)}</td>
+          </tr>
+          <tr>
+            <td>Installazione (distanza: {stimaWB.dist.replace("-", "–")} m)</td>
+            <td>{currency(stimaWB.install)}</td>
+          </tr>
+          <tr>
+            <td className="font-medium">Subtotale</td>
+            <td className="font-medium">{currency(stimaWB.subtotal)}</td>
+          </tr>
+          <tr>
+            <td>IVA ({number(stimaWB.vatPct, 1)}%)</td>
+            <td>{currency(stimaWB.vat)}</td>
+          </tr>
+          <tr>
+            <td className="font-semibold">Totale (IVA incl.)</td>
+            <td className="font-semibold">{currency(stimaWB.total)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </Card>
+  );
+
+  // --- vendorCopy/clientCopy: AI prezzi ---
+  const aiTableVendor = stimaAI && (
+    <Card className="mt-6">
+      <SectionHeader title="Stima economica AI" />
+      <table className="w-full text-sm mb-2">
+        <thead>
+          <tr>
+            <th>Categoria</th>
+            <th>Dettagli</th>
+            <th>Q.tà</th>
+            <th>Materiali</th>
+            <th>Ore ele</th>
+            <th>Ore appr</th>
+            <th>Viaggio</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stimaAI.rows.map((r, idx) => (
+            <tr key={idx}>
+              <td>{r.category}</td>
+              <td>{r.details}</td>
+              <td>{r.qty}</td>
+              <td>
+                {r.materials.map(m => (
+                  <div key={m.key}>{m.qty}x {m.descr} ({currency(m.unitCHF)}) = {currency((parseFloat(String(m.unitCHF).replace(",", ".")) || 0) * (parseFloat(String(m.qty).replace(",", ".")) || 0))}</div>
+                ))}
+              </td>
+              <td>{number((parseFloat(String(r.minutes.ele).replace(",", ".")) || 0)/60,2)}</td>
+              <td>{number((parseFloat(String(r.minutes.app).replace(",", ".")) || 0)/60,2)}</td>
+              <td>{r.travelMinutesAR}</td>
+              <td>{r.note}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <table className="w-full text-sm">
+        <tbody>
+          <tr>
+            <td>Manodopera</td>
+            <td>{currency(stimaAI.totals.laborCHF)}</td>
+          </tr>
+          <tr>
+            <td>Materiali</td>
+            <td>{currency(stimaAI.totals.materialsCHF)}</td>
+          </tr>
+          <tr>
+            <td>Spostamento</td>
+            <td>{currency(stimaAI.totals.travelCHF)}</td>
+          </tr>
+          <tr>
+            <td>Subtotale</td>
+            <td>{currency(stimaAI.totals.subtotal)}</td>
+          </tr>
+          <tr>
+            <td>Sconto (%)</td>
+            <td>{number(stimaAI.totals.discountPct,1)}%</td>
+          </tr>
+          <tr>
+            <td>IVA ({number(stimaAI.totals.vatPct,1)}%)</td>
+            <td>{currency(stimaAI.totals.vat)}</td>
+          </tr>
+          <tr>
+            <td className="font-semibold">Totale (IVA incl.)</td>
+            <td className="font-semibold">{currency(stimaAI.totals.total)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </Card>
+  );
+
+  const aiTableClient = stimaAI && (
+    <Card className="mt-6">
+      <SectionHeader title="Sintesi economica" />
+      <div className="mb-2">
+        {offer.customer?.firstName ? `Gentile ${offer.customer.firstName},` : "Gentile cliente,"}
+        <br />
+        Le proponiamo l'intervento richiesto con le seguenti lavorazioni:
+        <ul className="list-disc ml-4">
+          {stimaAI.rows.map((r, idx) => (
+            <li key={idx}>{r.category}{r.details ? `: ${r.details}` : ""} ({r.qty}x)</li>
+          ))}
+        </ul>
+        Materiali previsti: {stimaAI.rows.flatMap(r => r.materials.map(m => `${m.qty}x ${m.descr}`)).join(", ") || "nessun materiale specificato"}.
+        <br />
+        Manodopera e spostamento inclusi. Totale stimato (IVA inclusa): <b>{currency(stimaAI.totals.total)}</b>.
+      </div>
+      <table className="w-full text-sm">
+        <tbody>
+          <tr>
+            <td>Materiali</td>
+            <td>{currency(stimaAI.totals.materialsCHF)}</td>
+          </tr>
+          <tr>
+            <td>Manodopera</td>
+            <td>{currency(stimaAI.totals.laborCHF)}</td>
+          </tr>
+          <tr>
+            <td>Spostamento</td>
+            <td>{currency(stimaAI.totals.travelCHF)}</td>
+          </tr>
+          <tr className="font-semibold">
+            <td className="text-right">Totale (IVA incl.)</td>
+            <td>{currency(stimaAI.totals.total)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </Card>
+  );
+
   const vendorCopy = (
     <>
       <OfferDoc offer={offer} audience="vendor" />
@@ -1598,6 +2091,8 @@ function OfferView({ offer, onNew, onEdit }) {
           {rendimentoTable}
         </>
       )}
+      {isWallbox && wallboxTable}
+      {isAI && aiTableVendor}
     </>
   );
 
@@ -1609,7 +2104,7 @@ function OfferView({ offer, onNew, onEdit }) {
         <>
           <Card className="mt-6">
             <SectionHeader title="Stima economica" />
-            <table className="w-full text-sm">
+            <table className="w-full text-left text-sm">
               <tbody>
                 <tr>
                   <td>Taglia selezionata</td>
@@ -1663,7 +2158,9 @@ function OfferView({ offer, onNew, onEdit }) {
           </Card>
           {rendimentoTable}
         </>
-      )}
+      )} 
+      {isWallbox && wallboxTable}
+      {isAI && aiTableClient}
     </div>
   );
 
@@ -1716,6 +2213,8 @@ function OfferDoc({ offer, audience }) {
   const s = offer.settingsSnapshot;
   const c = offer.customer;
   const isInstall = offer.type === "install";
+  // --- ADD: wallbox summary ---
+  const isWallbox = offer.type === "wallbox";
 
   return (
     <div className="grid gap-4 text-sm">
@@ -1744,6 +2243,36 @@ function OfferDoc({ offer, audience }) {
       </header>
 
       <div className="grid gap-3">
+        {isWallbox && (
+          <>
+            <SectionHeader title="Proposta Wallbox" />
+            <table className="w-full text-left text-sm mb-2">
+              <tbody>
+                <tr>
+                  <td className="py-1 text-zinc-500">Potenza scelta</td>
+                  <td className="py-1 font-medium">{offer.computed.chargerKW} kW</td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-zinc-500">Distanza dal quadro</td>
+                  <td className="py-1 font-medium">{offer.computed.distanceBand.replace("-", "–")} m</td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-zinc-500">Tipo punto di ricarica</td>
+                  <td className="py-1 font-medium">
+                    {offer.computed.chargerType === "presa" ? "Presa semplice"
+                      : offer.computed.chargerType === "standard" ? "Wallbox standard"
+                      : offer.computed.chargerType === "smart" ? "Wallbox smart"
+                      : offer.computed.chargerType}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-zinc-500">Prezzo</td>
+                  <td className="py-1 font-medium">Da definire</td>
+                </tr>
+              </tbody>
+            </table>
+          </>
+        )}
         {isInstall ? (
           <>
             <SectionHeader title="Proposta impianto FV" />
@@ -1777,7 +2306,7 @@ function OfferDoc({ offer, audience }) {
               Nota: dimensionamento indicativo basato su 1 kWp ≈ 1000 kWh/anno; taglie finali e prezzi da definire dopo sopralluogo.
             </div>
           </>
-        ) : (
+        ) : offer.type === "maintenance" ? (
           <>
             <SectionHeader title="Intervento di manutenzione / pulizia" />
             <table className="w-full text-left text-sm">
@@ -1803,9 +2332,8 @@ function OfferDoc({ offer, audience }) {
             )}
             <div className="text-xs text-zinc-500">Calcolo interno con tariffa amministratore e IVA impostata.</div>
           </>
-        )}
+        ) : null}
       </div>
-
       <div className="mt-4 grid gap-1 text-xs text-zinc-500">
         <div>Condizioni: offerta non vincolante. Validità 30 giorni salvo diversa indicazione. Installazione/manutenzione soggetta a sopralluogo.</div>
         <div>Per domande: {s.company.phone} · {s.company.email}</div>
@@ -1856,9 +2384,7 @@ function ArchiveView({ onSelectOffer }) {
       const offer = await getOfferFromDB(offerRef);
       const dataStr = JSON.stringify(offer, null, 2);
       const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-      
       const exportFileDefaultName = `prg/${offerRef}.json`;
-      
       const linkElement = document.createElement('a');
       linkElement.setAttribute('href', dataUri);
       linkElement.setAttribute('download', exportFileDefaultName);
@@ -1876,7 +2402,6 @@ function ArchiveView({ onSelectOffer }) {
         alert('Nessun PDF trovato per questa offerta');
         return;
       }
-      
       const url = URL.createObjectURL(pdfBlob);
       const link = document.createElement('a');
       link.href = url;
@@ -1901,7 +2426,6 @@ function ArchiveView({ onSelectOffer }) {
         <h1 className="text-2xl font-bold">Archivio Offerte</h1>
         <Button onClick={loadOffers}>Aggiorna</Button>
       </div>
-
       {offers.length === 0 ? (
         <Card>
           <div className="text-center py-8 text-zinc-500">
@@ -1916,9 +2440,12 @@ function ArchiveView({ onSelectOffer }) {
                 <div>
                   <h3 className="font-semibold">{offer.offerRef}</h3>
                   <p className="text-sm text-zinc-500">
-                    {new Date(offer.createdAt).toLocaleDateString('it-CH')} · 
-                    {offer.type === 'install' ? ' Nuovo impianto' : ' Manutenzione'} · 
-                    {offer.customer.firstName} {offer.customer.lastName}
+                    {new Date(offer.createdAt).toLocaleDateString('it-CH')} ·
+                    {offer.type === 'install' ? ' Nuovo impianto'
+                      : offer.type === 'maintenance' ? ' Manutenzione'
+                      : offer.type === 'service' ? <span><span className="inline-block px-2 py-1 bg-fuchsia-100 text-fuchsia-700 rounded text-xs font-semibold mr-1">Bozza AI</span>Preventivo rapido</span>
+                      : ''}
+                    · {offer.customer?.firstName || ""} {offer.customer?.lastName || ""}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -1944,10 +2471,540 @@ function ArchiveView({ onSelectOffer }) {
   );
 }
 
+// --- Segnaposto Wallbox ---
+function WallboxForm({ form, setForm, settings, onCreate }) {
+  // Etichette per select
+  const chargerTypes = [
+    { value: "presa", label: "Presa semplice" },
+    { value: "standard", label: "Wallbox standard" },
+    { value: "smart", label: "Wallbox smart" }
+  ];
+  const chargerKWs = [
+    { value: "11", label: "11 kW" },
+    { value: "22", label: "22 kW" }
+  ];
+  const distanceBands = [
+    { value: "0-5", label: "0–5 m" },
+    { value: "5-10", label: "5–10 m" },
+    { value: "10-25", label: "10–25 m" },
+    { value: "25-50", label: "25–50 m" }
+  ];
+
+  // Riassunto live
+  const summaryRows = [
+    { label: "Potenza wallbox", value: chargerKWs.find(x => x.value === form.chargerKW)?.label || `${form.chargerKW} kW` },
+    { label: "Distanza dal quadro elettrico", value: distanceBands.find(x => x.value === form.distanceBand)?.label || form.distanceBand },
+    { label: "Tipo punto di ricarica", value: chargerTypes.find(x => x.value === form.chargerType)?.label || form.chargerType }
+  ];
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Offerta Wallbox</h2>
+        <Button variant="ghost" onClick={() => window.history.back?.() || setForm(form)}>Annulla</Button>
+      </div>
+      <Card>
+        <div className="grid gap-6">
+          <div>
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Dati cliente</h3>
+            <PersonFields form={form} setForm={setForm} settings={settings} />
+            <div className="grid gap-3 md:grid-cols-2 mt-3">
+              <Labeled label="Telefono">
+                <Input
+                  value={form.phone}
+                  onChange={e => setForm({ ...form, phone: e.target.value })}
+                  placeholder="Telefono"
+                />
+              </Labeled>
+              <Labeled label="Email">
+                <Input
+                  value={form.email}
+                  onChange={e => setForm({ ...form, email: e.target.value })}
+                  placeholder="Email"
+                />
+              </Labeled>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <Labeled label="Potenza Wallbox">
+              <select
+                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition dark:border-zinc-700 dark:bg-zinc-950"
+                value={form.chargerKW}
+                onChange={e => setForm({ ...form, chargerKW: e.target.value })}
+              >
+                {chargerKWs.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </Labeled>
+            <Labeled label="Distanza dal quadro elettrico">
+              <select
+                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition dark:border-zinc-700 dark:bg-zinc-950"
+                value={form.distanceBand}
+                onChange={e => setForm({ ...form, distanceBand: e.target.value })}
+              >
+                {distanceBands.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </Labeled>
+            <Labeled label="Tipo punto di ricarica">
+              <select
+                className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition dark:border-zinc-700 dark:bg-zinc-950"
+                value={form.chargerType}
+                onChange={e => setForm({ ...form, chargerType: e.target.value })}
+              >
+                {chargerTypes.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </Labeled>
+          </div>
+          <div className="rounded-xl border border-purple-200 bg-purple-50 p-3 text-sm dark:border-purple-900/50 dark:bg-purple-900/20">
+            <b>Riepilogo selezione:</b>
+            <table className="mt-2 w-full text-sm">
+              <tbody>
+                {summaryRows.map(row => (
+                  <tr key={row.label}>
+                    <td className="text-zinc-500">{row.label}</td>
+                    <td className="font-medium">{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button icon={FileText} onClick={onCreate}>
+              Genera offerta
+            </Button>
+            <Button variant="ghost" onClick={() => window.history.back?.() || setForm(form)}>Annulla</Button>
+          </div>
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
+// --- TriageAssistant (AI Preventivo rapido) ---
+function TriageAssistant({ setRoute, openOffer }) {
+  const [customer, setCustomer] = useState({
+    firstName: "",
+    lastName: "",
+    street: "",
+    cap: "",
+    city: "",
+    country: "Svizzera",
+    phone: "",
+    email: ""
+  });
+  const [lines, setLines] = useState([]);
+  const [current, setCurrent] = useState({
+    category: "",
+    details: "",
+    qty: 1,
+    timeMin: 0,
+    materialCHF: 0,
+    travelMinAR: 0
+  });
+  const [showMaterials, setShowMaterials] = useState(false);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [bozzaMode, setBozzaMode] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [snackbar, setSnackbar] = useState("");
+  const [calloutApplied, setCalloutApplied] = useState(true);
+  const settings = loadSettings();
+  const aiConfig = settings.aiConfig || DEFAULT_SETTINGS.aiConfig;
+  const vatPct = settings.pricing.vatPercent || 8.1;
+
+  // Se openOffer è passato, carica la bozza
+  useEffect(() => {
+    if (openOffer && openOffer.type === "service" && openOffer.aiDraft) {
+      setCustomer(openOffer.customer || {});
+      setLines(openOffer.aiDraft.lines || []);
+      setNotes(openOffer.aiDraft.notes || "");
+      setBozzaMode(true);
+      setCalloutApplied(typeof openOffer.aiDraft.calloutApplied === "boolean" ? openOffer.aiDraft.calloutApplied : (aiConfig.autoApplyCallout ?? true));
+    }
+  }, [openOffer]);
+
+  // Autocompilazione CAP → Città
+  useEffect(() => {
+    const cap = customer.cap?.trim();
+    if (cap && settings.capToCity[cap]) {
+      setCustomer((f) => ({ ...f, city: settings.capToCity[cap] }));
+    }
+  }, [customer.cap, settings.capToCity]);
+
+  // Stima viaggio
+  function stimaViaggio() {
+    const city = customer.city?.trim().toLowerCase();
+    const localMin = parseFloat(String(aiConfig.defaults.travelMinutesOneWayLocal).replace(",", ".")) || 15;
+    const extraMin = parseFloat(String(aiConfig.defaults.travelMinutesOneWayExtra).replace(",", ".")) || 35;
+    const isLocal = city === "bellinzona";
+    setCurrent(c => ({ ...c, travelMinAR: (isLocal ? localMin : extraMin) * 2 }));
+  }
+
+  // Handler aggiunta/modifica riga
+  function addOrEditLine() {
+    const qty = parseInt(current.qty) || 1;
+    const timeMin = parseFloat(String(current.timeMin).replace(",", ".")) || 0;
+    const materialCHF = parseFloat(String(current.materialCHF).replace(",", ".")) || 0;
+    const travelMinAR = parseFloat(String(current.travelMinAR).replace(",", ".")) || 0;
+    const line = {
+      id: Math.random().toString(36).slice(2),
+      descrizione: `${current.category}${current.details ? `: ${current.details}` : ""}`,
+      qty,
+      tempoMinTot: timeMin,
+      materialiTotCHF: materialCHF * qty,
+      viaggioMinAR: travelMinAR,
+      editable: true
+    };
+    if (editingIdx !== null) {
+      const arr = [...lines];
+      arr[editingIdx] = line;
+      setLines(arr);
+      setEditingIdx(null);
+    } else {
+      setLines([...lines, line]);
+    }
+    setCurrent({ category: "", details: "", qty: 1, timeMin: 0, materialCHF: 0, travelMinAR: 0 });
+  }
+
+  // Handler modifica riga
+  function editLine(idx) {
+    const l = lines[idx];
+    setEditingIdx(idx);
+    setCurrent({
+      category: l.descrizione.split(":")[0] || "",
+      details: l.descrizione.split(":")[1]?.trim() || "",
+      qty: l.qty,
+      timeMin: l.tempoMinTot,
+      materialCHF: l.materialiTotCHF / (l.qty || 1),
+      travelMinAR: l.viaggioMinAR || 0
+    });
+  }
+
+  // Handler rimuovi riga
+  function removeLine(idx) {
+    setLines(lines.filter((_, i) => i !== idx));
+    setEditingIdx(null);
+    setCurrent({ category: "", details: "", qty: 1, timeMin: 0, materialCHF: 0, travelMinAR: 0 });
+  }
+
+  // Calcolo preventivo
+  const totalTimeMin = lines.reduce((sum, l) => sum + (parseFloat(String(l.tempoMinTot).replace(",", ".")) || 0), 0);
+  const totalMaterialCHF = lines.reduce((sum, l) => sum + (parseFloat(String(l.materialiTotCHF).replace(",", ".")) || 0), 0);
+  const travelMinAR = lines.length > 0 ? (parseFloat(String(lines[0].viaggioMinAR).replace(",", ".")) || 0) : 0;
+  const rates = aiConfig.rates || {};
+  const hourlyWorker = parseFloat(String(rates.hourlyWorker).replace(",", ".")) || 95;
+  const hourlyApprentice = parseFloat(String(rates.hourlyApprentice).replace(",", ".")) || 55;
+  const calloutFee = calloutApplied ? (parseFloat(String(rates.calloutFee).replace(",", ".")) || 135) : 0;
+  const travelRatePerMinute = parseFloat(String(rates.travelRatePerMinute).replace(",", ".")) || 0;
+  const teamHourly = hourlyWorker + hourlyApprentice;
+  const timeH = totalTimeMin / 60;
+  const travelH = travelMinAR / 60;
+  const laborCHF = (timeH + travelH) * teamHourly;
+  const travelCHF = travelRatePerMinute > 0 ? travelMinAR * travelRatePerMinute : 0;
+  const subtotal = laborCHF + totalMaterialCHF + calloutFee + travelCHF;
+  const iva = subtotal * vatPct / 100;
+  const total = subtotal + iva;
+
+  // Testo discorsivo preventivo cliente
+  const preventivoCliente = `Buongiorno, sono di Edil Repairs Sagl (${aiConfig.companyHQ}).\n
+Le propongo il seguente preventivo per le lavorazioni richieste:\n` +
+    lines.map(l => `- ${l.descrizione} (${l.qty}x)`).join("\n") +
+    `\nMateriali e manodopera inclusi. Spostamento e call-out inclusi. Totale stimato (IVA inclusa): ${currency(total)}.\n`;
+
+  // PDF export (pulito)
+  async function exportBozzaPdf() {
+    // Crea un elemento DOM temporaneo solo per la sezione cliente
+    const pdfDiv = document.createElement("div");
+    pdfDiv.style.fontFamily = "sans-serif";
+    pdfDiv.style.maxWidth = "600px";
+    pdfDiv.style.margin = "0 auto";
+    pdfDiv.style.background = "white";
+    pdfDiv.style.color = "black";
+    pdfDiv.innerHTML = `
+      <div style="text-align:center;">
+        <img src="${import.meta.env.BASE_URL}img/logoedil.png" alt="Edil Repairs" style="height:48px;object-fit:contain;margin-bottom:8px;" />
+        <h2>Bozza Preventivo - Edil Repairs Sagl</h2>
+      </div>
+      <div>Cliente: ${customer.firstName || ""} ${customer.lastName || ""}, ${customer.street || ""}, ${customer.cap || ""} ${customer.city || ""}</div>
+      <div>Sede: ${aiConfig.companyHQ}</div>
+      <hr/>
+      <h3>Lavorazioni</h3>
+      <ul>
+        ${lines.map(l => `<li>${l.descrizione} (${l.qty}x)</li>`).join("")}
+      </ul>
+      <h3>Riepilogo economico</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td>Materiali</td><td>${currency(totalMaterialCHF)}</td></tr>
+        <tr><td>Manodopera (${number(timeH+travelH,2)} h squadra)</td><td>${currency(laborCHF)}</td></tr>
+        <tr><td>Viaggio (${number(travelMinAR,0)} min)</td><td>${currency(travelCHF)}</td></tr>
+        <tr><td>Call-out</td><td>${currency(calloutFee)}</td></tr>
+        <tr><td>IVA (${number(vatPct,1)}%)</td><td>${currency(iva)}</td></tr>
+        <tr style="font-weight:bold;"><td>Totale</td><td>${currency(total)}</td></tr>
+      </table>
+      ${notes ? `<div style="margin-top:12px;"><b>Note interne:</b> ${notes}</div>` : ""}
+    `;
+    pdfDiv.style.padding = "24px";
+    pdfDiv.style.borderRadius = "12px";
+    pdfDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)";
+    document.body.appendChild(pdfDiv);
+
+    // Usa exportOfferToPdf se disponibile, altrimenti fallback html2pdf
+    if (window.exportOfferToPdf) {
+      await window.exportOfferToPdf(pdfDiv, `bozza-${nextOfferRef()}.pdf`);
+    } else if (window.html2pdf) {
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: `bozza-${nextOfferRef()}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      await window.html2pdf().set(opt).from(pdfDiv).save();
+    }
+    document.body.removeChild(pdfDiv);
+  }
+
+  // Salva bozza in IndexedDB
+  async function saveBozza() {
+    const offerRef = nextOfferRef();
+    const offer = {
+      type: "service",
+      offerRef,
+      createdAt: new Date().toISOString(),
+      customer,
+      settingsSnapshot: settings,
+      aiDraft: {
+        lines,
+        totals: {
+          totalTimeMin,
+          totalMaterialCHF,
+          travelMinAR,
+          laborCHF,
+          travelCHF,
+          calloutFee,
+          subtotal,
+          iva,
+          total
+        },
+        notes,
+        calloutApplied
+      }
+    };
+    await saveOfferToDB(offer);
+    setSnackbar("Bozza salvata in Archivio");
+    setTimeout(() => setSnackbar(""), 2000);
+  }
+
+  // UI
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-semibold">Assistente AI (preventivo rapido)</h2>
+        <Button variant="ghost" onClick={() => setRoute("home")}>Indietro</Button>
+      </div>
+      <Card>
+        <div className="grid gap-6">
+          <div>
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Dati cliente</h3>
+            <PersonFields form={customer} setForm={setCustomer} settings={settings} />
+            <div className="grid gap-3 md:grid-cols-2 mt-3">
+              <Labeled label="Telefono">
+                <Input
+                  value={customer.phone}
+                  onChange={e => setCustomer({ ...customer, phone: e.target.value })}
+                  placeholder="Telefono"
+                />
+              </Labeled>
+              <Labeled label="Email">
+                <Input
+                  value={customer.email}
+                  onChange={e => setCustomer({ ...customer, email: e.target.value })}
+                  placeholder="Email"
+                />
+              </Labeled>
+            </div>
+          </div>
+          {!bozzaMode && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Nuova richiesta</h3>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Labeled label="Categoria">
+                  <select
+                    value={current.category}
+                    onChange={e => setCurrent(c => ({ ...c, category: e.target.value }))
+                    }
+                    className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition dark:border-zinc-700 dark:bg-zinc-950"
+                  >
+                    <option value="">Seleziona...</option>
+                    {Object.keys(aiConfig.taskTimesMin).map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                  </select>
+                </Labeled>
+                <Labeled label="Dettagli">
+                  <Input
+                    value={current.details}
+                    onChange={e => setCurrent(c => ({ ...c, details: e.target.value }))}
+                    placeholder="Dettagli lavorazione"
+                  />
+                </Labeled>
+                <Labeled label="Quantità">
+                  <Input
+                    inputMode="numeric"
+                    value={current.qty}
+                    onChange={e => setCurrent(c => ({ ...c, qty: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </Labeled>
+                <Labeled label="Tempo (min)">
+                  <Input
+                    inputMode="numeric"
+                    value={current.timeMin}
+                    onChange={e => setCurrent(c => ({ ...c, timeMin: e.target.value.replace(/[^0-9]/g, "") }))}
+                    placeholder={`Default: ${aiConfig.taskTimesMin[current.category] || ""}`}
+                  />
+                </Labeled>
+                <Labeled label="Materiale (CHF/unità)">
+                  <Input
+                    inputMode="decimal"
+                    value={current.materialCHF}
+                    onChange={e => setCurrent(c => ({ ...c, materialCHF: e.target.value.replace(/[^0-9.,]/g, "") }))}
+                    placeholder={`Default: ${aiConfig.materialsCHF[Object.keys(aiConfig.materialsCHF).find(k => k.toLowerCase().includes(current.category?.toLowerCase() || ""))] || ""}`}
+                  />
+                </Labeled>
+                <Labeled label="Viaggio A/R (min)">
+                  <Input
+                    inputMode="numeric"
+                    value={current.travelMinAR}
+                    onChange={e => setCurrent(c => ({ ...c, travelMinAR: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                  <Button variant="subtle" onClick={stimaViaggio}>Stima viaggio</Button>
+                </Labeled>
+              </div>
+              <div className="mt-3 flex gap-2">
+                <Button onClick={addOrEditLine}>{editingIdx !== null ? "Salva modifica" : "Aggiungi richiesta"}</Button>
+                <Button variant="ghost" onClick={() => setBozzaMode(true)}>Concludi e genera bozza</Button>
+              </div>
+            </div>
+          )}
+          <div className="mt-4">
+            <SectionHeader title="Righe bozza" />
+            <table className="w-full text-sm mb-2">
+              <thead>
+                <tr>
+                  <th>Descrizione</th>
+                  <th>Q.tà</th>
+                  <th>Tempo (min)</th>
+                  <th>Materiali (CHF)</th>
+                  <th>Viaggio (min)</th>
+                  <th>Azioni</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((l, idx) => (
+                  <tr key={l.id}>
+                    <td>{l.descrizione}</td>
+                    <td>{l.qty}</td>
+                    <td>{l.tempoMinTot}</td>
+                    <td>{l.materialiTotCHF}</td>
+                    <td>{l.viaggioMinAR}</td>
+                    <td>
+                      <Button variant="subtle" size="sm" onClick={() => editLine(idx)}>Modifica</Button>
+                      <Button variant="subtle" size="sm" onClick={() => removeLine(idx)}>Rimuovi</Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Checkbox
+              checked={showMaterials}
+              onChange={setShowMaterials}
+              label="Mostra dettaglio materiali per riga"
+            />
+            {showMaterials && (
+              <div className="mt-2 text-xs text-zinc-500">
+                {lines.map((l, idx) => (
+                  <div key={l.id}>
+                    Riga {idx + 1}: {l.descrizione} - Materiali stimati: {currency(l.materialiTotCHF)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {bozzaMode && (
+            <div>
+              <SectionHeader title="Bozza preventivo" />
+              <div className="mb-2">
+                <textarea className="w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm" rows={4} value={preventivoCliente} readOnly />
+                <Button variant="subtle" onClick={() => navigator.clipboard.writeText(preventivoCliente)}>Copia testo</Button>
+              </div>
+              <div className="mb-2">
+                <table className="w-full text-sm">
+                  <tbody>
+                    <tr>
+                      <td>Materiali</td>
+                      <td>{currency(totalMaterialCHF)}</td>
+                    </tr>
+                    <tr>
+                      <td>Manodopera ({number(timeH+travelH,2)} h squadra)</td>
+                      <td>{currency(laborCHF)}</td>
+                    </tr>
+                    <tr>
+                      <td>Viaggio ({number(travelMinAR,0)} min)</td>
+                      <td>{currency(travelCHF)}</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        Call-out
+                        <Checkbox
+                          checked={calloutApplied}
+                          onChange={v => setCalloutApplied(v)}
+                          label={calloutApplied ? "Applica" : "Non applicare"}
+                        />
+                      </td>
+                      <td>{currency(calloutFee)}</td>
+                    </tr>
+                    <tr>
+                      <td>IVA ({number(vatPct,1)}%)</td>
+                      <td>{currency(iva)}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td className="text-right">Totale</td>
+                      <td>{currency(total)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <Labeled label="Note interne">
+                <textarea
+                  className="w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm"
+                  rows={2}
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Note interne (non visibili al cliente)"
+                />
+              </Labeled>
+              <div className="flex gap-2 mt-2">
+                <Button icon={FileText} onClick={exportBozzaPdf}>Esporta PDF</Button>
+                <Button variant="primary" onClick={saveBozza}>Salva bozza in Archivio</Button>
+                <Button variant="ghost" onClick={() => setBozzaMode(false)}>Modifica richieste</Button>
+                <Button variant="ghost" onClick={() => { setLines([]); setBozzaMode(false); setNotes(""); }}>Reset sessione</Button>
+              </div>
+              {snackbar && <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded-xl shadow">{snackbar}</div>}
+            </div>
+          )}
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
+// --- Footer ---
 function Footer({ company }) {
   return (
     <div className="fixed bottom-0 left-0 right-0 border-t border-zinc-200 bg-white/80 px-4 py-2 text-center text-xs text-zinc-500 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75">
-      © {new Date().getFullYear()} {company.name} · Pronto per stampa/PDF · Dati salvati in locale
+      © {new Date().getFullYear()} {company?.name || "La Mia Azienda"} · Pronto per stampa/PDF · Dati salvati in locale
     </div>
   );
 }
