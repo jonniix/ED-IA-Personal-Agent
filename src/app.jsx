@@ -1169,23 +1169,6 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
               )}
             </div>
           </div>
-          <div className="grid gap-3 md:grid-c
-             <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Autoconsumo & Immissione</h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.energy}
-                onChange={(v) => update("locked.energy", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('energy') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('energy')}>
-                  Sblocca
-                </Button>
-              )}
-            </div>
-          </div>
           <div className="grid gap-3 md:grid-cols-3">
             <Labeled label="% Autoconsumo con pompa di calore">
               <Input
@@ -1935,8 +1918,7 @@ function ArchiveView({ onSelectOffer }) {
                   <h3 className="font-semibold">{offer.offerRef}</h3>
                   <p className="text-sm text-zinc-500">
                     {new Date(offer.createdAt).toLocaleDateString('it-CH')} · 
-                    {offer.type === 'install'
-                             {offer.type === 'install' ? ' Nuovo impianto' : ' Manutenzione'} · 
+                    {offer.type === 'install' ? ' Nuovo impianto' : ' Manutenzione'} · 
                     {offer.customer.firstName} {offer.customer.lastName}
                   </p>
                 </div>
