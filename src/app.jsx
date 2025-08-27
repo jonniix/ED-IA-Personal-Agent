@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer, Archive } from "lucide-react";
-import html2pdf from "html2pdf.js";
-import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "./lib/db";
+import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "../lib/db";
 
 // --- Utility helpers ---
 const currency = (n, currency = "CHF") =>
@@ -765,7 +764,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
     norm.incentives = {
       federalCHFPerKW: parseField(federalIncentive, settings.pricing.incentives?.federalCHFPerKW ?? 360),
       cantonalCHFPerKW: parseField(cantonalIncentive, settings.pricing.incentives?.cantonalCHFPerKW ?? 180),
-      municipalCHFPerKW: parseField(municipalInceptives, settings.pricing.incentives?.municipalCHFPerKW ?? 10),
+      municipalCHFPerKW: parseField(municipalIncentive, settings.pricing.incentives?.municipalCHFPerKW ?? 10),
     };
     // Autoconsumo & Immissione (clamp 0-100 sulle %)
     norm.selfConsumptionPctWithHeatPump = Math.max(0, Math.min(100, parseFloat(String(norm.selfConsumptionPctWithHeatPump).replace(',', '.')) || 0));
@@ -1080,7 +1079,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
           </div>
           <div className="mt-2 text-xs text-zinc-500">
             8 kW → {currency(pricePerKWFromCurve(8, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
-            &nbsp;·&nbsp;50 kW → {currency(pricePerKWFromCurcurve(50, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
+            &nbsp;·&nbsp;50 kW → {currency(pricePerKWFromCurve(50, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
             &nbsp;·&nbsp;200 kW → {currency(pricePerKWFromCurve(200, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
           </div>
         </Card>
