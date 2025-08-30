@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer, Archive } from "lucide-react";
 import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "../lib/db";
+import CatalogEditor from "./ai/CatalogEditor.jsx";
 
 // --- Utility helpers ---
 const currency = (n, currency = "CHF") =>
@@ -438,7 +439,14 @@ export default function App() {
           <OfferView
             offer={offer}
             onNew={resetAll}
-            onEdit={() => setRoute(offer?.type === 'install' ? 'new' : 'maint')}
+            onEdit={() => {
+              const t = offer?.type;
+              if (t === "install") setRoute("new");
+              else if (t === "maintenance") setRoute("maint");
+              else if (t === "wallbox") setRoute("wallbox");
+              else if (t === "service") setRoute("ai");
+              else setRoute("home");
+            }}
           />
         )}
         {route === "archive" && (
@@ -504,17 +512,20 @@ function Checkbox({ checked, onChange, label }) {
   );
 }
 
-function Button({ children, onClick, variant = "primary", icon: Icon, className = "", type = "button" }) {
+function Button({ children, onClick, variant = "primary", icon: Icon, className = "", type = "button", size = "md" }) {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition active:translate-y-[1px]";
+    "inline-flex items-center justify-center gap-2 rounded-xl text-sm font-medium transition active:translate-y-[1px]";
+  const sizes = {
+    md: "px-4 py-2",
+    sm: "px-3 py-1.5 text-xs rounded-lg",
+  };
   const variants = {
-    primary:
-      "bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 shadow-sm",
+    primary: "bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 shadow-sm",
     ghost: "border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800",
     subtle: "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700",
   };
   return (
-    <button type={type} onClick={onClick} className={cls(base, variants[variant], className)}>
+    <button type={type} onClick={onClick} className={[base, sizes[size] || sizes.md, variants[variant], className].join(" ")}>
       {Icon && <Icon size={16} />}
       {children}
     </button>
@@ -968,6 +979,16 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
     return s;
   });
 
+  // Defensive ensure aiCatalog always present
+  React.useEffect(() => {
+    if (!local.aiCatalog) {
+      setLocal(prev => ({
+        ...prev,
+        aiCatalog: (prev.aiCatalog ?? (typeof DEFAULT_SETTINGS !== "undefined" ? DEFAULT_SETTINGS.aiCatalog : {}))
+      }));
+    }
+  }, [local.aiCatalog]);
+
   const [pvSizesText, setPvSizesText] = useState(() =>
     Array.isArray(settings.pvSizesKW) ? settings.pvSizesKW.join(", ") : String(settings.pvSizesKW || "")
   );
@@ -1019,7 +1040,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
   // Normalizza curve su blur/salva
   const normalizeCurve = (curve) => {
     return {
-      minKW: parseInt(curcurveMinKW) || 8,
+      minKW: parseInt(curveMinKW) || 8,
       priceAtMin: parseFloat(String(curvePriceAtMin).replace(",", ".")) || 2000,
       maxKW: parseInt(curveMaxKW) || 200,
       priceAtMax: parseFloat(String(curvePriceAtMax).replace(",", ".")) || 1000,
@@ -1093,12 +1114,17 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
     return norm;
   };
 
+  // Deep setter for update(path, value)
   const update = (path, value) => {
     const next = JSON.parse(JSON.stringify(local));
-    const [a, b, c] = path.split(".");
-    if (c !== undefined) next[a][b][c] = value;
-    else if (b !== undefined) next[a][b] = value;
-    else next[a] = value;
+    const segs = path.split(".");
+    let cur = next;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const k = segs[i];
+      if (typeof cur[k] !== "object" || cur[k] === null) cur[k] = {};
+      cur = cur[k];
+    }
+    cur[segs[segs.length - 1]] = value;
     setLocal(next);
   };
 
@@ -1120,8 +1146,40 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold">Pannello amministratore</h2>
         <div className="text-xs text-zinc-500">Le modifiche vengono salvate nel dispositivo (localStorage)</div>
+        <Button variant="subtle" size="sm" onClick={() => {
+          const el = document.getElementById("admin-ai-catalogo");
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}>
+          Vai a Catalogo AI
+        </Button>
       </div>
       <div className="grid gap-4">
+        {/* --- Catalogo AI card: fixed JSX nesting --- */}
+        <Card id="admin-ai-catalogo" data-testid="admin-ai-catalogo">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+              Assistente AI · Catalogo prezzi/tempi
+            </h3>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.locked.ai}
+                onChange={(v) => update("locked.ai", v)}
+                label="Protetto"
+              />
+              {isGroupLocked('ai') && (
+                <Button variant="subtle" size="sm" onClick={() => handleUnlock('ai')}>
+                  Sblocca
+                </Button>
+              )}
+            </div>
+          </div>
+          <CatalogEditor
+            value={local.aiCatalog}
+            onChange={(next) => update("aiCatalog", next)}
+            disabled={isGroupLocked('ai')}
+          />
+        </Card>
+        {/* ...other cards... */}
         <Card>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Azienda</h3>
@@ -1336,7 +1394,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
                 }}
                 onBlur={e => {
                   const v = parseInt(e.target.value);
-                  setCurcurveMinKW(isNaN(v) ? curveMinKW : String(v));
+                  setCurveMinKW(isNaN(v) ? curveMinKW : String(v));
                 }}
                 disabled={isGroupLocked('curve')}
               />
@@ -1613,12 +1671,11 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
               normLocal.wallboxPricing = normalizeWallboxPricing(normLocal.wallboxPricing);
               normLocal.ai = normalizeAi(normLocal.ai);
               normLocal.aiConfig = normalizeAiConfig(normLocal.aiConfig);
+              normLocal.aiCatalog = normalizeAiCatalog(normLocal.aiCatalog);
               setSettings(normLocal);
               saveSettings(normLocal);
             }}
-         
-
-          >
+         >
             Salva impostazioni
           </Button>
           <Button variant="ghost" onClick={() => setLocal(loadSettings())}>Annulla modifiche</Button>
@@ -1819,6 +1876,10 @@ function OfferView({ offer, onNew, onEdit }) {
 
   const doExportPdf = async () => {
     try {
+      if (!window.html2pdf) {
+        alert("Modulo PDF non caricato. Controlla lo script html2pdf nel file index.html.");
+        return;
+      }
       // Crea un elemento nascosto per il PDF
       const pdfElement = document.createElement('div');
       pdfElement.className = 'pdf-container';
@@ -1848,16 +1909,11 @@ function OfferView({ offer, onNew, onEdit }) {
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       };
-      
-      const worker = html2pdf().set(opt).from(pdfElement);
+      const worker = window.html2pdf().set(opt).from(pdfElement);
       const blob = await worker.outputPdf('blob');
       const url = URL.createObjectURL(blob);
       window.open(url, '_blank');
-      
-      // Salva il PDF nel database
       await savePdfToDB(offer.offerRef, blob);
-      
-      // Rimuovi l'elemento temporaneo
       document.body.removeChild(pdfElement);
     } catch (error) {
       console.error('Errore durante esportazione PDF:', error);
@@ -1934,6 +1990,7 @@ function OfferView({ offer, onNew, onEdit }) {
               <td>{r.note}</td>
             </tr>
           ))}
+
         </tbody>
       </table>
       <table className="w-full text-sm">
@@ -2216,6 +2273,23 @@ function OfferDoc({ offer, audience }) {
   // --- ADD: wallbox summary ---
   const isWallbox = offer.type === "wallbox";
 
+  // Calcolo prezzo totale Wallbox (IVA inclusa) per la stampa
+  let wallboxTotalCHF = null;
+  if (isWallbox) {
+    const wb = (s.wallboxPricing || DEFAULT_SETTINGS.wallboxPricing);
+    const typ = offer.computed.chargerType;
+    const kw  = String(offer.computed.chargerKW);
+    const dist = offer.computed.distanceBand;
+
+    const base    = parseFloat(String(wb.base?.[typ]).replace(",", ".")) || 0;
+    const addon   = parseFloat(String(wb.powerAddon?.[kw]).replace(",", ".")) || 0;
+    const install = parseFloat(String(wb.distanceBand?.[dist]).replace(",", ".")) || 0;
+
+    const subtotal = base + addon + install;
+    const vatPct   = parseFloat(String(s.pricing?.vatPercent).replace(",", ".")) || 0;
+    wallboxTotalCHF = subtotal * (1 + (vatPct / 100));
+  }
+
   return (
     <div className="grid gap-4 text-sm">
       <header className="flex items-start justify-between gap-6">
@@ -2267,7 +2341,9 @@ function OfferDoc({ offer, audience }) {
                 </tr>
                 <tr>
                   <td className="py-1 text-zinc-500">Prezzo</td>
-                  <td className="py-1 font-medium">Da definire</td>
+                  <td className="py-1 font-medium">
+                    {wallboxTotalCHF != null ? currency(wallboxTotalCHF) : "Da definire"}
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -2286,7 +2362,7 @@ function OfferDoc({ offer, audience }) {
               <tbody>
                 <tr className="border-t border-zinc-200 dark:border-zinc-800">
                   <td className="py-1">Consumo annuo stimato</td>
-                  <td className="py-1">{number(offer.computed.annualKWh, 0)} kWh</td>
+                  <td className="py-1">{number(offer.computed.annualKWh, 0)} kWh/anno</td>
                 </tr>
                 <tr className="border-t border-zinc-200 dark:border-zinc-800">
                   <td className="py-1">Prezzo energia considerato</td>
@@ -2715,56 +2791,108 @@ Le propongo il seguente preventivo per le lavorazioni richieste:\n` +
     lines.map(l => `- ${l.descrizione} (${l.qty}x)`).join("\n") +
     `\nMateriali e manodopera inclusi. Spostamento e call-out inclusi. Totale stimato (IVA inclusa): ${currency(total)}.\n`;
 
-  // PDF export (pulito)
+  // PDF export (hardening: DOM nodes, no innerHTML)
   async function exportBozzaPdf() {
-    // Crea un elemento DOM temporaneo solo per la sezione cliente
+    if (!window.html2pdf) {
+      alert("Modulo PDF non caricato. Controlla lo script html2pdf nel file index.html.");
+      return;
+    }
     const pdfDiv = document.createElement("div");
     pdfDiv.style.fontFamily = "sans-serif";
     pdfDiv.style.maxWidth = "600px";
     pdfDiv.style.margin = "0 auto";
     pdfDiv.style.background = "white";
     pdfDiv.style.color = "black";
-    pdfDiv.innerHTML = `
-      <div style="text-align:center;">
-        <img src="${import.meta.env.BASE_URL}img/logoedil.png" alt="Edil Repairs" style="height:48px;object-fit:contain;margin-bottom:8px;" />
-        <h2>Bozza Preventivo - Edil Repairs Sagl</h2>
-      </div>
-      <div>Cliente: ${customer.firstName || ""} ${customer.lastName || ""}, ${customer.street || ""}, ${customer.cap || ""} ${customer.city || ""}</div>
-      <div>Sede: ${aiConfig.companyHQ}</div>
-      <hr/>
-      <h3>Lavorazioni</h3>
-      <ul>
-        ${lines.map(l => `<li>${l.descrizione} (${l.qty}x)</li>`).join("")}
-      </ul>
-      <h3>Riepilogo economico</h3>
-      <table style="width:100%;border-collapse:collapse;">
-        <tr><td>Materiali</td><td>${currency(totalMaterialCHF)}</td></tr>
-        <tr><td>Manodopera (${number(timeH+travelH,2)} h squadra)</td><td>${currency(laborCHF)}</td></tr>
-        <tr><td>Viaggio (${number(travelMinAR,0)} min)</td><td>${currency(travelCHF)}</td></tr>
-        <tr><td>Call-out</td><td>${currency(calloutFee)}</td></tr>
-        <tr><td>IVA (${number(vatPct,1)}%)</td><td>${currency(iva)}</td></tr>
-        <tr style="font-weight:bold;"><td>Totale</td><td>${currency(total)}</td></tr>
-      </table>
-      ${notes ? `<div style="margin-top:12px;"><b>Note interne:</b> ${notes}</div>` : ""}
-    `;
     pdfDiv.style.padding = "24px";
     pdfDiv.style.borderRadius = "12px";
     pdfDiv.style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)";
+
+    // Header
+    const header = document.createElement("div");
+    header.style.textAlign = "center";
+    const logo = document.createElement("img");
+    logo.src = import.meta.env.BASE_URL + "img/logoedil.png";
+    logo.alt = "Edil Repairs";
+    logo.style.height = "48px";
+    logo.style.objectFit = "contain";
+    logo.style.marginBottom = "8px";
+    const h2 = document.createElement("h2");
+    h2.textContent = "Bozza Preventivo - Edil Repairs Sagl";
+    header.appendChild(logo);
+    header.appendChild(h2);
+    pdfDiv.appendChild(header);
+
+    // Cliente
+    const cliente = document.createElement("div");
+    cliente.textContent =
+      `Cliente: ${(customer.firstName||"")} ${(customer.lastName||"")}, ` +
+      `${(customer.street||"")}, ${(customer.cap||"")} ${(customer.city||"")}`;
+    pdfDiv.appendChild(cliente);
+
+    const sede = document.createElement("div");
+    sede.textContent = `Sede: ${settings.aiConfig?.companyHQ || ""}`;
+    pdfDiv.appendChild(sede);
+
+    const hr = document.createElement("hr");
+    pdfDiv.appendChild(hr);
+
+    // Lavorazioni
+    const h3a = document.createElement("h3");
+    h3a.textContent = "Lavorazioni";
+    pdfDiv.appendChild(h3a);
+
+    const ul = document.createElement("ul");
+    lines.forEach(l => {
+      const li = document.createElement("li");
+      li.textContent = `${l.descrizione} (${l.qty}x)`;
+      ul.appendChild(li);
+    });
+    pdfDiv.appendChild(ul);
+
+    // Riepilogo economico
+    const h3b = document.createElement("h3");
+    h3b.textContent = "Riepilogo economico";
+    pdfDiv.appendChild(h3b);
+
+    const table = document.createElement("table");
+    table.style.width = "100%";
+    table.style.borderCollapse = "collapse";
+    const rows = [
+      ["Materiali", currency(totalMaterialCHF)],
+      [`Manodopera (${number(timeH+travelH,2)} h squadra)`, currency(laborCHF)],
+      [`Viaggio (${number(travelMinAR,0)} min)`, currency(travelCHF)],
+      ["Call-out", currency(calloutFee)],
+      [`IVA (${number(vatPct,1)}%)`, currency(iva)],
+      ["Totale", currency(total)]
+    ];
+    rows.forEach(([k,v]) => {
+      const tr = document.createElement("tr");
+      const td1 = document.createElement("td"); td1.textContent = k;
+      const td2 = document.createElement("td"); td2.textContent = v;
+      tr.appendChild(td1); tr.appendChild(td2);
+      table.appendChild(tr);
+    });
+    pdfDiv.appendChild(table);
+
+    if (notes) {
+      const notesDiv = document.createElement("div");
+      notesDiv.style.marginTop = "12px";
+      const b = document.createElement("b"); b.textContent = "Note interne: ";
+      const span = document.createElement("span"); span.textContent = notes;
+      notesDiv.appendChild(b); notesDiv.appendChild(span);
+      pdfDiv.appendChild(notesDiv);
+    }
+
     document.body.appendChild(pdfDiv);
 
-    // Usa exportOfferToPdf se disponibile, altrimenti fallback html2pdf
-    if (window.exportOfferToPdf) {
-      await window.exportOfferToPdf(pdfDiv, `bozza-${nextOfferRef()}.pdf`);
-    } else if (window.html2pdf) {
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: `bozza-${nextOfferRef()}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-      await window.html2pdf().set(opt).from(pdfDiv).save();
-    }
+    const opt = {
+      margin: [10, 10, 10, 10],
+      filename: `bozza-${nextOfferRef()}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    await window.html2pdf().set(opt).from(pdfDiv).save();
     document.body.removeChild(pdfDiv);
   }
 
@@ -3000,11 +3128,11 @@ Le propongo il seguente preventivo per le lavorazioni richieste:\n` +
   );
 }
 
-// --- Footer ---
 function Footer({ company }) {
+  const name = company?.name || "La Mia Azienda";
   return (
     <div className="fixed bottom-0 left-0 right-0 border-t border-zinc-200 bg-white/80 px-4 py-2 text-center text-xs text-zinc-500 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75">
-      © {new Date().getFullYear()} {company?.name || "La Mia Azienda"} · Pronto per stampa/PDF · Dati salvati in locale
+      © {new Date().getFullYear()} {name} · Pronto per stampa/PDF · Dati salvati in locale
     </div>
   );
 }
