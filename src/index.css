@@ -4,3 +4,70 @@
 
 :root { color-scheme: light dark; }
 html, body, #root { height: 100%; }
+
+/* ===== PRINT LAYOUT ===== */
+@media print {
+  /* Nascondi tutto */
+  body * { visibility: hidden !important; }
+
+  /* Mostra SOLO l'area di stampa attiva */
+  .print-root.is-print-target,
+  .print-root.is-print-target * { visibility: visible !important; }
+
+  /* Niente sidebar/topbar in ogni caso */
+  .sidebar, .topbar, header, nav, aside, [data-role="sidebar"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Reset margini/padding */
+  html, body, #root, .print-root {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Salto pagina forzato */
+  .page-break {
+    break-before: page;
+    page-break-before: always; /* compat vecchi engine */
+  }
+}
+
+/* Copertina */
+.print-cover h1 { margin: 0 0 8px; font-size: 22px; }
+.print-cover h2 { margin: 0 0 16px; font-size: 16px; opacity: .85; }
+.print-cover .kv { margin: 6px 0; }
+/* Copertina */
+.print-cover h1 { margin: 0 0 8px; font-size: 22px; }
+.print-cover h2 { margin: 0 0 16px; font-size: 16px; opacity: .85; }
+.print-cover .kv { margin: 6px 0; }
+
+/* Bottone primario "Stampa" */
+#btn-print-all{
+  background: #2563eb;
+  color:#fff;
+  border:1px solid #1d4ed8;
+
+  /* dimensioni coerenti */
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  height:40px;              /* <- come gli altri */
+  padding:0 16px;           /* <- come gli altri */
+  border-radius:12px;       /* <- come gli altri */
+  font-size:14px;
+  font-weight:600;
+  line-height:1;            /* evita “schiacciamenti” */
+  cursor:pointer;
+
+  transition:background .15s ease, transform .02s ease, box-shadow .15s ease;
+}
+#btn-print-all:hover{ background:#1d4ed8; }
+#btn-print-all:active{ transform:translateY(1px); }
+#btn-print-all:focus{ outline:2px solid #93c5fd; outline-offset:2px; }
+
+/* nascondi in stampa */
+@media print {
+  #btn-print-all{ display:none !important; }
+}

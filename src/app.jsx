@@ -5,6 +5,16 @@ import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, sav
 import CatalogEditor from "./ai/CatalogEditor.jsx";
 import AIWizard from "./ai/AIWizard.jsx";
 import pkg from '../package.json';
+import { calcSelfConsumptionPct } from './lib/energy';
+import PrintCover from './features/offers/components/PrintCover';
+import SummaryNarrative from './features/offers/components/SummaryNarrative';
+import Signatures from './features/offers/components/Signatures';
+import TermsAndConditions from './features/offers/components/TermsAndConditions';
+import formatDate from './lib/format';
+import CustomerData from './features/offers/CustomerData';
+import ProposalDetails from './features/offers/ProposalDetails';
+import EconomicAnalysisDetails from './features/offers/EconomicAnalysisDetails';
+import EnergyPerformance from './features/offers/EnergyPerformance';
 
 // --- Utility helpers ---
 const currency = (n, currency = "CHF") =>
@@ -1869,10 +1879,15 @@ function OfferView({ offer, onNew, onEdit }) {
     const valueExport = gridKWh * exportPrice;
     const annualBenefit = valueAuto + valueExport;
 
+    // --- nuovo calcolo autoconsumo % rispetto al consumo cliente ---
+    const consumoCliente = offer.computed.annualKWh || 0;
+    const autoconsumoPct = calcSelfConsumptionPct(consumoCliente, prod, autoKWh);
+
     stima = {
       kw, unit, subtotal, discountVal, vatPct, vat, totalBeforeIncentives,
       incFed, incCant, incMun, totalNet, discountPct,
-      prod, autoPct, autoKWh, gridKWh, valueAuto, valueExport, annualBenefit
+      prod, autoPct, autoKWh, gridKWh, valueAuto, valueExport, annualBenefit,
+      autoconsumoPct, consumoCliente
     };
   }
 
@@ -1912,12 +1927,16 @@ function OfferView({ offer, onNew, onEdit }) {
       <table className="w-full text-sm">
         <tbody>
           <tr>
-            <td>Produzione stimata</td>
+            <td>Produzione FV stimata</td>
             <td>{number(stima.prod, 0)} kWh/anno</td>
           </tr>
           <tr>
-            <td>Autoconsumo</td>
-            <td>{number(stima.autoPct * 100, 0)}%</td>
+            <td>Consumo cliente</td>
+            <td>{number(stima.consumoCliente, 0)} kWh/anno</td>
+          </tr>
+          <tr>
+            <td>Copertura FV (%)</td>
+            <td>{Math.round(stima.autoconsumoPct * 100) / 100}%</td>
           </tr>
           <tr>
             <td>kWh autoconsumati</td>
@@ -1936,7 +1955,7 @@ function OfferView({ offer, onNew, onEdit }) {
             <td>{currency(stima.valueExport)}</td>
           </tr>
           <tr>
-            <td className="font-semibold">Beneficio annuo estimato</td>
+            <td className="font-semibold">Beneficio annuo stimato</td>
             <td className="font-semibold">{currency(stima.annualBenefit)}</td>
           </tr>
         </tbody>
@@ -1944,8 +1963,35 @@ function OfferView({ offer, onNew, onEdit }) {
     </Card>
   );
 
-  const doPrint = () => {
+  // PATCH 3: stampa solo area selezionata
+  const doPrintCustomerCopy = () => {
+    document.getElementById('customer-copy')?.classList.add('is-print-target');
+    document.getElementById('vendor-copy')?.classList.remove('is-print-target');
     window.print();
+    setTimeout(() => {
+      document.getElementById('customer-copy')?.classList.remove('is-print-target');
+    }, 1000);
+  };
+  const doPrintVendorCopy = () => {
+    document.getElementById('vendor-copy')?.classList.add('is-print-target');
+    document.getElementById('customer-copy')?.classList.remove('is-print-target');
+    window.print();
+    setTimeout(() => {
+      document.getElementById('vendor-copy')?.classList.remove('is-print-target');
+    }, 1000);
+  };
+
+  // Unico handler stampa entrambe le copie
+  const handlePrintAll = () => {
+    const vendor = document.getElementById('vendor-copy');
+    const customer = document.getElementById('customer-copy');
+    vendor?.classList.add('is-print-target');
+    customer?.classList.add('is-print-target');
+    window.print();
+    setTimeout(() => {
+      vendor?.classList.remove('is-print-target');
+      customer?.classList.remove('is-print-target');
+    }, 300);
   };
 
   const doExportPdf = async () => {
@@ -1999,7 +2045,7 @@ function OfferView({ offer, onNew, onEdit }) {
   const wallboxTable = stimaWB && (
     <Card className="mt-6">
       <SectionHeader title="Stima economica Wallbox" />
-      <table className="w-full text-sm">
+      <table className="w-full text-left text-sm mb-2">
         <tbody>
           <tr>
             <td>Hardware ({stimaWB.typ === "presa" ? "Presa semplice" : stimaWB.typ === "standard" ? "Wallbox standard" : "Wallbox smart"})</td>
@@ -2142,157 +2188,207 @@ function OfferView({ offer, onNew, onEdit }) {
   );
 
   const vendorCopy = (
-    <>
-      <OfferDoc offer={offer} audience="vendor" />
+    <section id="vendor-copy" className="print-root">
+      {/* COPERTINA */}
+      <div className="print-cover">
+        <h1>Copia interna — Offerta FV</h1>
+        <div className="kv"><strong>Numero offerta:</strong> {offer.offerRef}</div>
+        <div className="kv"><strong>Data:</strong> {formatDate(offer.createdAt)}</div>
+        <div className="kv"><strong>Cliente:</strong> {offer.customer?.firstName} {offer.customer?.lastName}</div>
+      </div>
+      <div className="page-break" />
+      {/* 1) Dati cliente */}
+      <div>
+        <SectionHeader title="Dati cliente" />
+        <div className="mb-2">
+          {offer.customer?.firstName} {offer.customer?.lastName}<br />
+          {offer.customer?.street}<br />
+          {offer.customer?.cap} {offer.customer?.city} · {offer.customer?.country}
+        </div>
+      </div>
+      {/* 2) Dettagli proposta */}
+      <div>
+        <SectionHeader title="Dettagli proposta" />
+        <OfferDoc offer={offer} audience="vendor" />
+      </div>
+      {/* 3) Riepilogo narrativo */}
+      <SummaryNarrative
+        pvSizeKw={stima?.kw}
+        pvProdKWh={stima?.prod}
+        loadKWh={stima?.consumoCliente}
+        selfUsePct={stima?.autoconsumoPct}
+        selfUseValueCHF={stima?.valueAuto}
+        exportValueCHF={stima?.valueExport}
+        annualBenefitCHF={stima?.annualBenefit}
+        paybackYears={stima ? Math.round(stima.totalNet / (stima.annualBenefit || 1)) : 0}
+        netCostCHF={stima?.totalNet}
+      />
+      <div className="page-break" />
+      {/* 4) Stima economica (dettaglio) */}
       {isInstall && (
-        <>
-          <Card className="mt-6">
-            <SectionHeader title="Stima economica" />
-            <div className="mb-2 flex items-center gap-3">
-              <label className="text-sm text-zinc-600 dark:text-zinc-400 font-medium">
-                Sconto %
-                <input
-                  type="number"
-                  min={0}
-                  max={30}
-                  step={0.5}
-                  value={discountPct}
-                  onChange={e => {
-                    let v = parseFloat(e.target.value.replace(",", "."));
-                    if (isNaN(v)) v = 0;
-                    if (v < 0) v = 0;
-                    if (v > 30) v = 30;
-                    setDiscountPct(v);
-                  }}
-                  className="ml-2 w-16 rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700"
-                  style={{ verticalAlign: "middle" }}
-                />
-              </label>
-            </div>
-            <table className="w-full text-sm">
-              <tbody>
-                <tr>
-                  <td>Taglia selezionata</td>
-                  <td className="font-medium">{number(stima.kw, 1)} kW</td>
-                </tr>
-                <tr>
-                  <td>Prezzo unitario</td>
-                  <td>{currency(stima.unit)}</td>
-                </tr>
-                <tr>
-                  <td>Subtotale</td>
-                  <td>{currency(stima.subtotal)}</td>
-                </tr>
+        <Card>
+          <SectionHeader title="Stima economica (dettaglio)" />
+          <table className="w-full text-left text-sm">
+            <tbody>
+              <tr>
+                <td>Taglia selezionata</td>
+                <td className="font-medium">{number(stima.kw, 1)} kW</td>
+              </tr>
+              <tr>
+                <td>Prezzo unitario</td>
+                <td>{currency(stima.unit)}</td>
+              </tr>
+              <tr>
+                <td>Subtotale</td>
+                <td>{currency(stima.subtotal)}</td>
+              </tr>
+              <tr>
+                <td>Sconto</td>
+                <td>{currency(stima.discountVal)} ({number(stima.discountPct, 1)}%)</td>
+              </tr>
+              <tr>
+                <td>IVA</td>
+                <td>{number(stima.vatPct, 1)}%</td>
+              </tr>
+              <tr>
+                <td className="font-medium">Totale (IVA incl.)</td>
+                <td className="font-medium">{currency(stima.totalBeforeIncentives)}</td>
+              </tr>
+              <tr>
+                <td>Incentivo federale</td>
+                <td>{currency(-stima.incFed)}</td>
+              </tr>
+              <tr>
+                <td>Incentivo cantonale</td>
+                <td>{currency(-stima.incCant)}</td>
+              </tr>
+              <tr>
+                <td>Incentivo comunale</td>
+                <td>{currency(-stima.incMun)}</td>
+              </tr>
+              <tr>
+                <td className="font-semibold">Totale netto dopo incentivi</td>
+                <td className="font-semibold">{currency(stima.totalNet)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="mt-2">
+            <span className="text-xs text-zinc-500">
+              L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
+            </span>
+          </div>
+        </Card>
+      )}
+      {/* 5) Rendimento energetico stimato */}
+      {rendimentoTable}
+      {/* 6) Firme */}
+      <Signatures />
+      {/* 7) Condizioni generali */}
+      <TermsAndConditions />
+    </section>
+  );
+
+  const clientCopy = (
+    <section id="customer-copy" className="print-root">
+      {/* COPERTINA */}
+      <div className="print-cover">
+        <h1>Copia per il cliente — Offerta FV</h1>
+        <div className="kv"><strong>Numero offerta:</strong> {offer?.code || offer?.offerRef || offer?.id || '—'}</div>
+        <div className="kv"><strong>Data:</strong> {formatDate(offer?.createdAt || offer?.date)}</div>
+        <div className="kv"><strong>Cliente:</strong> {offer?.customer?.firstName} {offer?.customer?.lastName}</div>
+      </div>
+      <div className="page-break" />
+      {/* 1) Dati cliente */}
+      <div>
+        <SectionHeader title="Dati cliente" />
+        <div className="mb-2">
+          {offer.customer?.firstName} {offer.customer?.lastName}<br />
+          {offer.customer?.street}<br />
+          {offer.customer?.cap} {offer.customer?.city} · {offer.customer?.country}
+        </div>
+      </div>
+      {/* 2) Dettagli proposta */}
+      <div>
+        <SectionHeader title="Dettagli proposta" />
+        <OfferDoc offer={offer} audience="client" />
+      </div>
+      {/* 3) Riepilogo narrativo */}
+      <SummaryNarrative
+        pvSizeKw={stima?.kw}
+        pvProdKWh={stima?.prod}
+        loadKWh={stima?.consumoCliente}
+        selfUsePct={stima?.autoconsumoPct}
+        selfUseValueCHF={stima?.valueAuto}
+        exportValueCHF={stima?.valueExport}
+        annualBenefitCHF={stima?.annualBenefit}
+        paybackYears={stima ? Math.round(stima.totalNet / (stima.annualBenefit || 1)) : 0}
+        netCostCHF={stima?.totalNet}
+      />
+      <div className="page-break" />
+      {/* 4) Stima economica (dettaglio) */}
+      {isInstall && (
+        <Card>
+          <SectionHeader title="Stima economica (dettaglio)" />
+          <table className="w-full text-left text-sm">
+            <tbody>
+              <tr>
+                <td>Taglia selezionata</td>
+                <td className="font-medium">{number(stima.kw, 1)} kW</td>
+              </tr>
+              <tr>
+                <td>Prezzo unitario</td>
+                <td>{currency(stima.unit)}</td>
+              </tr>
+              <tr>
+                <td>Subtotale</td>
+                <td>{currency(stima.subtotal)}</td>
+              </tr>
+              {stima.discountPct > 0 && (
                 <tr>
                   <td>Sconto</td>
                   <td>{currency(stima.discountVal)} ({number(stima.discountPct, 1)}%)</td>
                 </tr>
-                <tr>
-                  <td>IVA</td>
-                  <td>{number(stima.vatPct, 1)}%</td>
-                </tr>
-                <tr>
-                  <td className="font-medium">Totale (IVA incl.)</td>
-                  <td className="font-medium">{currency(stima.totalBeforeIncentives)}</td>
-                </tr>
-                <tr>
-                  <td>Incentivo federale</td>
-                  <td>{currency(-stima.incFed)}</td>
-                </tr>
-                <tr>
-                  <td>Incentivo cantonale</td>
-                  <td>{currency(-stima.incCant)}</td>
-                </tr>
-                <tr>
-                  <td>Incentivo comunale</td>
-                  <td>{currency(-stima.incMun)}</td>
-                </tr>
-                <tr>
-                  <td className="font-semibold">Totale netto dopo incentivi</td>
-                  <td className="font-semibold">{currency(stima.totalNet)}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="mt-2">
-              <span className="text-xs text-zinc-500">
-                L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
-              </span>
-            </div>
-          </Card>
-          {rendimentoTable}
-        </>
+              )}
+              <tr>
+                <td>IVA</td>
+                <td>{number(stima.vatPct, 1)}%</td>
+              </tr>
+              <tr>
+                <td className="font-medium">Totale (IVA incl.)</td>
+                <td className="font-medium">{currency(stima.totalBeforeIncentives)}</td>
+              </tr>
+              <tr>
+                <td>Incentivo federale</td>
+                <td>{currency(-stima.incFed)}</td>
+              </tr>
+              <tr>
+                <td>Incentivo cantonale</td>
+                <td>{currency(-stima.incCant)}</td>
+              </tr>
+              <tr>
+                <td>Incentivo comunale</td>
+                <td>{currency(-stima.incMun)}</td>
+              </tr>
+              <tr>
+                <td className="font-semibold">Totale netto dopo incentivi</td>
+                <td className="font-semibold">{currency(stima.totalNet)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="mt-2">
+            <span className="text-xs text-zinc-500">
+              L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
+            </span>
+          </div>
+        </Card>
       )}
-      {isWallbox && wallboxTable}
-      {isAI && aiTableVendor}
-    </>
-  );
-
-  const clientCopy = (
-    <div className="client-copy">
-      <OfferSummary offer={offer} stima={stima} />
-      <OfferDoc offer={offer} audience="client" />
-      {isInstall && (
-        <>
-          <Card className="mt-6">
-            <SectionHeader title="Stima economica" />
-            <table className="w-full text-left text-sm">
-              <tbody>
-                <tr>
-                  <td>Taglia selezionata</td>
-                  <td className="font-medium">{number(stima.kw, 1)} kW</td>
-                </tr>
-                <tr>
-                  <td>Prezzo unitario</td>
-                  <td>{currency(stima.unit)}</td>
-                </tr>
-                <tr>
-                  <td>Subtotale</td>
-                  <td>{currency(stima.subtotal)}</td>
-                </tr>
-                {stima.discountPct > 0 && (
-                  <tr>
-                    <td>Sconto</td>
-                    <td>{currency(stima.discountVal)} ({number(stima.discountPct, 1)}%)</td>
-                  </tr>
-                )}
-                <tr>
-                  <td>IVA</td>
-                  <td>{number(stima.vatPct, 1)}%</td>
-                </tr>
-                <tr>
-                  <td className="font-medium">Totale (IVA incl.)</td>
-                  <td className="font-medium">{currency(stima.totalBeforeIncentives)}</td>
-                </tr>
-                <tr>
-                  <td>Incentivo federale</td>
-                  <td>{currency(-stima.incFed)}</td>
-                </tr>
-                <tr>
-                  <td>Incentivo cantonale</td>
-                  <td>{currency(-stima.incCant)}</td>
-                </tr>
-                <tr>
-                  <td>Incentivo comunale</td>
-                  <td>{currency(-stima.incMun)}</td>
-                </tr>
-                <tr>
-                  <td className="font-semibold">Totale netto dopo incentivi</td>
-                  <td className="font-semibold">{currency(stima.totalNet)}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div className="mt-2">
-              <span className="text-xs text-zinc-500">
-                L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
-              </span>
-            </div>
-          </Card>
-          {rendimentoTable}
-        </>
-      )} 
-      {isWallbox && wallboxTable}
-      {isAI && aiTableClient}
-    </div>
+      {/* 5) Rendimento energetico stimato */}
+      {rendimentoTable}
+      {/* 6) Firme */}
+      <Signatures />
+      {/* 7) Condizioni generali */}
+      <TermsAndConditions />
+    </section>
   );
 
   return (
@@ -2301,7 +2397,12 @@ function OfferView({ offer, onNew, onEdit }) {
         <h2 className="text-xl font-semibold">Offerta {offer.offerRef} · {date.toLocaleDateString("it-CH")}</h2>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={onEdit}>Modifica dati</Button>
-          <Button icon={Printer} onClick={doPrint}>Stampa</Button>
+          {/* Bottone blu "Stampa" con id */}
+          <div style={{ display: 'flex', gap: 8, margin: '12px 0' }}>
+            <button id="btn-print-all" onClick={handlePrintAll}>Stampa</button>
+          </div>
+          {/* <Button icon={Printer} onClick={doPrintVendorCopy}>Stampa copia venditore</Button> */}
+          {/* <Button icon={Printer} onClick={doPrintCustomerCopy}>Stampa copia cliente</Button> */}
           <Button icon={FileText} onClick={doExportPdf}>Esporta PDF</Button>
           <Button variant="ghost" onClick={onNew}>Nuova offerta</Button>
         </div>
@@ -2313,14 +2414,117 @@ function OfferView({ offer, onNew, onEdit }) {
             <div className="text-lg font-semibold">Copia per il venditore</div>
             <span className="text-xs text-zinc-500">Uso interno</span>
           </div>
-          {vendorCopy}
+          {/* PATCH 3: print-root wrapper */}
+          <section id="vendor-copy" className="print-root">
+            {vendorCopy}
+          </section>
         </Card>
         <Card className="print:break-before-page print:shadow-none">
           <div className="mb-4 flex items-center justify-between">
             <div className="text-lg font-semibold">Copia per il cliente</div>
             <span className="text-xs text-zinc-500">Da consegnare al cliente</span>
           </div>
-          {clientCopy}
+          {/* PATCH 3: print-root wrapper */}
+          <section id="customer-copy" className="print-root">
+            {/* PATCH 4: copertina con numero offerta corretto */}
+            <div className="print-cover">
+              <h1>Copia per il cliente — Offerta FV</h1>
+              <div className="kv"><strong>Numero offerta:</strong> {offer?.code || offer?.offerRef || offer?.id || '—'}</div>
+              <div className="kv"><strong>Data:</strong> {formatDate(offer?.createdAt || offer?.date)}</div>
+              <div className="kv"><strong>Cliente:</strong> {offer?.customer?.firstName} {offer?.customer?.lastName}</div>
+            </div>
+            <div className="page-break" />
+            {/* 1) Dati cliente */}
+            <div>
+              <SectionHeader title="Dati cliente" />
+              <div className="mb-2">
+                {offer.customer?.firstName} {offer.customer?.lastName}<br />
+                {offer.customer?.street}<br />
+                {offer.customer?.cap} {offer.customer?.city} · {offer.customer?.country}
+              </div>
+            </div>
+            {/* 2) Dettagli proposta */}
+            <div>
+              <SectionHeader title="Dettagli proposta" />
+              <OfferDoc offer={offer} audience="client" />
+            </div>
+            {/* 3) Riepilogo narrativo */}
+            <SummaryNarrative
+              pvSizeKw={stima?.kw}
+              pvProdKWh={stima?.prod}
+              loadKWh={stima?.consumoCliente}
+              selfUsePct={stima?.autoconsumoPct}
+              selfUseValueCHF={stima?.valueAuto}
+              exportValueCHF={stima?.valueExport}
+              annualBenefitCHF={stima?.annualBenefit}
+              paybackYears={stima ? Math.round(stima.totalNet / (stima.annualBenefit || 1)) : 0}
+              netCostCHF={stima?.totalNet}
+            />
+            <div className="page-break" />
+            {/* 4) Stima economica (dettaglio) */}
+            {isInstall && (
+              <Card>
+                <SectionHeader title="Stima economica (dettaglio)" />
+                <table className="w-full text-left text-sm">
+                  <tbody>
+                    <tr>
+                      <td>Taglia selezionata</td>
+                      <td className="font-medium">{number(stima.kw, 1)} kW</td>
+                    </tr>
+                    <tr>
+                      <td>Prezzo unitario</td>
+                      <td>{currency(stima.unit)}</td>
+                    </tr>
+                    <tr>
+                      <td>Subtotale</td>
+                      <td>{currency(stima.subtotal)}</td>
+                    </tr>
+                    {stima.discountPct > 0 && (
+                      <tr>
+                        <td>Sconto</td>
+                        <td>{currency(stima.discountVal)} ({number(stima.discountPct, 1)}%)</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td>IVA</td>
+                      <td>{number(stima.vatPct, 1)}%</td>
+                    </tr>
+                    <tr>
+                      <td className="font-medium">Totale (IVA incl.)</td>
+                      <td className="font-medium">{currency(stima.totalBeforeIncentives)}</td>
+                    </tr>
+                    <tr>
+                      <td>Incentivo federale</td>
+                      <td>{currency(-stima.incFed)}</td>
+                    </tr>
+                    <tr>
+                      <td>Incentivo cantonale</td>
+                      <td>{currency(-stima.incCant)}</td>
+                    </tr>
+                    <tr>
+                      <td>Incentivo comunale</td>
+                      <td>{currency(-stima.incMun)}</td>
+                    </tr>
+                    <tr>
+                      <td className="font-semibold">Totale netto dopo incentivi</td>
+                      <td className="font-semibold">{currency(stima.totalNet)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="mt-2">
+                  <span className="text-xs text-zinc-500">
+                    L'incentivo comunale è indicativo e può variare; la conferma avverrà dopo verifica presso il Comune.
+                  </span>
+                </div>
+              </Card>
+            )}
+            {/* 5) Rendimento energetico stimato */}
+            {rendimentoTable}
+            {/* 6) Firme */}
+            <Signatures />
+            {/* 7) Condizioni generali */}
+            <TermsAndConditions />
+          </section>
         </Card>
       </div>
 
@@ -3185,6 +3389,7 @@ Le propongo il seguente preventivo per le lavorazioni richieste:\n` +
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Note interne (non visibili al cliente)"
+               
                 />
               </Labeled>
               <div className="flex gap-2 mt-2">
