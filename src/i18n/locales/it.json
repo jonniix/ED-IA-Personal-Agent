@@ -1,0 +1,20 @@
+{
+  "metrics": {
+    "selfConsumptionPct": "Copertura FV (%)"
+  },
+  "pdf": {
+    "sections": {
+      "customerData": "Dati cliente",
+      "proposalDetails": "Dettagli proposta",
+      "summary": "Riassunto",
+      "economicAnalysis": "Analisi economica (dettaglio)",
+      "terms": "Condizioni di pagamento e accettazione"
+    },
+    "terms": {
+      "split": "Il pagamento è suddiviso come segue:",
+      "p1": "40% all’ordine materiale",
+      "p2": "40% alla posa impianto FV",
+      "p3": "20% allacciamento e collaudi (incluso dossier finale completo di ogni documento)"
+    }
+  }
+}

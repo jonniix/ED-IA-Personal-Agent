@@ -63,3 +63,13 @@ Abilita GitHub Pages dalle impostazioni del repository.
 La pubblicazione su GitHub Pages avviene tramite lo script:
 npm run deploy
 che utilizza `gh-pages` per pubblicare la cartella `dist`.
+
+## Metriche
+
+**Autoconsumo %**  
+Calcolato come:
+
+Autoconsumo % = (kWh FV autoconsumati) / (kWh consumati dal cliente) × 100
+
+Questa formula indica la copertura FV rispetto al fabbisogno reale del cliente.  
+_Precedentemente la % era calcolata rispetto alla produzione FV._

@@ -1,10 +1,10 @@
 # Dependencies
-node_modules/
+node_modules
 .pnp
 .pnp.js
 
 # Production builds
-dist/
+dist
 build/
 
 # Environment files
