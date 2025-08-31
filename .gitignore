@@ -42,4 +42,6 @@ coverage/
 # Cache directories
 .cache/
 .tmp/
-.temp/
+.temp/dist/ 
+node_modules/ 
+.DS_Store
