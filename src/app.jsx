@@ -4,6 +4,7 @@ import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer, Archive 
 import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "../lib/db";
 import CatalogEditor from "./ai/CatalogEditor.jsx";
 import AIWizard from "./ai/AIWizard.jsx";
+import pkg from '../package.json';
 
 // --- Utility helpers ---
 const currency = (n, currency = "CHF") =>
@@ -547,7 +548,9 @@ function TopBar({ theme, setTheme, route, setRoute, company }) {
         <div className="flex items-center gap-3">
           <img src={import.meta.env.BASE_URL + "img/logoedil.png"} alt="Edil Repairs" className="h-8 w-auto object-contain" />
           <div>
-            <div className="text-sm font-semibold leading-4">{company.name}</div>
+            <div className="text-sm font-semibold leading-4">{company.name}
+              <span style={{ opacity: 0.7, marginLeft: 8 }}>v{pkg.version}</span>
+            </div>
             <div className="text-xs text-zinc-500">Edil Repairs Artificial Intelligence</div>
           </div>
         </div>
