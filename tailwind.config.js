@@ -3,7 +3,7 @@
 export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
+    "./src/**/*.{js,jsx,ts,tsx}",
     // Se hai file React anche fuori da /src, aggiungi eventualmente:
     // "./*.{js,ts,jsx,tsx}",
     // Esclusione extra (se vuoi tenere pattern larghi):
