@@ -39,7 +39,7 @@ start_app.bat
 
 ## URL finale dell’app
 
-[https://jonat.github.io/pv-event-toolkit/](https://jonat.github.io/pv-event-toolkit/) <!-- Aggiorna con GITHUB_USERNAME e REPO_NAME -->
+[https://jonniix.github.io/ED-IA-Personal-Agent/](https://jonniix.github.io/ED-IA-Personal-Agent/) <!-- Aggiorna con GITHUB_USERNAME e REPO_NAME -->
 
 ## Note tecniche
 
@@ -53,8 +53,13 @@ git init
 git add .
 git commit -m "setup"
 git branch -M main
-git remote add origin git@github.com:jonat/pv-event-toolkit.git
+git remote add origin git@github.com:jonniix/ED-IA-Personal-Agent.git
 git push -u origin main
 ```
 
 Abilita GitHub Pages dalle impostazioni del repository.
+
+# Deployment
+La pubblicazione su GitHub Pages avviene tramite lo script:
+npm run deploy
+che utilizza `gh-pages` per pubblicare la cartella `dist`.

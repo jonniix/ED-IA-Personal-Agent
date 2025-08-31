@@ -1,0 +1,14 @@
+﻿
+FullName                                                                                 
+--------                                                                                 
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\app.jsx             
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\index.css           
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\main.jsx            
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\ai\AIWizard.jsx     
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\ai\CatalogEditor.jsx
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\ai\wizardTree.js    
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\lib\db.js           
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\lib\utils.js        
+C:\Users\jonat\Desktop\ED-IA Solutions\EDAI\ED-IA-Personal-Agent\src\pdf\exportPdf.js    
+
+

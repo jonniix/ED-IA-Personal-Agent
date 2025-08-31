@@ -1149,6 +1149,19 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
     return settings.locked[group] && !unlockedGroups[group];
   };
 
+  // --- Indice categorie ---
+  const SECTIONS = [
+    { id: 'admin-company',    title: 'Azienda',             icon: Settings },
+    { id: 'admin-pricing',    title: 'Parametri di calcolo',icon: Settings },
+    { id: 'admin-curve',      title: 'Range prezzo (CHF/kW)', icon: Settings },
+    { id: 'admin-incentives', title: 'Incentivi',           icon: Settings },
+    { id: 'admin-energy',     title: 'Autoconsumo & Immissione', icon: Settings },
+    { id: 'admin-wallbox',    title: 'Wallbox',             icon: PlugZap },
+    { id: 'admin-ai-catalogo',title: 'Assistente AI · Catalogo', icon: Wrench }
+  ];
+
+  const [activeSection, setActiveSection] = React.useState(null);
+
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
       <div className="mb-4 flex items-center justify-between">
@@ -1161,459 +1174,508 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
           Vai a Catalogo AI
         </Button>
       </div>
+      {/* --- Indice categorie --- */}
+      <Card>
+        <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Categorie</div>
+        <div className="flex flex-wrap gap-2 mb-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Mostra tutte"
+            onClick={() => setActiveSection(null)}
+          >
+            Mostra tutte
+          </Button>
+        </div>
+        <div className="grid gap-2 grid-cols-2 sm:grid-cols-3 md:grid-cols-4">
+          {SECTIONS.map(sec => (
+            <Button
+              key={sec.id}
+              variant="subtle"
+              icon={sec.icon}
+              size="sm"
+              aria-label={sec.title}
+              onClick={() => {
+                setActiveSection(sec.id);
+                const el = document.getElementById(sec.id);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              className={`w-full justify-start${activeSection === sec.id ? ' ring-2 ring-blue-500/40' : ''}`}
+            >
+              {sec.title}
+            </Button>
+          ))}
+        </div>
+      </Card>
       <div className="grid gap-4">
         {/* --- Catalogo AI card: fixed JSX nesting --- */}
-        <Card id="admin-ai-catalogo" data-testid="admin-ai-catalogo">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-              Assistente AI · Catalogo prezzi/tempi
-            </h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.ai}
-                onChange={(v) => update("locked.ai", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('ai') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('ai')}>
-                  Sblocca
-                </Button>
-              )}
+        <div className={activeSection && activeSection !== "admin-ai-catalogo" ? "hidden" : ""}>
+          <Card id="admin-ai-catalogo" data-testid="admin-ai-catalogo">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+                Assistente AI · Catalogo prezzi/tempi
+              </h3>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.locked.ai}
+                  onChange={(v) => update("locked.ai", v)}
+                  label="Protetto"
+                />
+                {isGroupLocked('ai') && (
+                  <Button variant="subtle" size="sm" onClick={() => handleUnlock('ai')}>
+                    Sblocca
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-          <CatalogEditor
-            value={local.aiCatalog}
-            onChange={(next) => update("aiCatalog", next)}
-            disabled={isGroupLocked('ai')}
-          />
-        </Card>
-        {/* ...other cards... */}
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Azienda</h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.company}
-                onChange={(v) => update("locked.company", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('company') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('company')}>
-                  Sblocca
-                </Button>
-              )}
+            <CatalogEditor
+              value={local.aiCatalog}
+              onChange={(next) => update("aiCatalog", next)}
+              disabled={isGroupLocked('ai')}
+            />
+          </Card>
+        </div>
+        {/* --- Card Azienda --- */}
+        <div className={activeSection && activeSection !== "admin-company" ? "hidden" : ""}>
+          <Card id="admin-company">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Azienda</h3>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.locked.company}
+                  onChange={(v) => update("locked.company", v)}
+                  label="Protetto"
+                />
+                {isGroupLocked('company') && (
+                  <Button variant="subtle" size="sm" onClick={() => handleUnlock('company')}>
+                    Sblocca
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Labeled label="Nome società">
-              <Input 
-                value={local.company.name} 
-                onChange={(e) => update("company.name", e.target.value)} 
-                disabled={isGroupLocked('company')}
-              />
-            </Labeled>
-            <Labeled label="Logo (testo breve)">
-              <Input 
-                value={local.company.logoText} 
-                onChange={(e) => update("company.logoText", e.target.value)} 
-                disabled={isGroupLocked('company')}
-              />
-            </Labeled>
-            <Labeled label="Telefono">
-              <Input 
-                value={local.company.phone} 
-                onChange={(e) => update("company.phone", e.target.value)} 
-                disabled={isGroupLocked('company')}
-              />
-            </Labeled>
-            <Labeled label="Email">
-              <Input 
-                value={local.company.email} 
-                onChange={(e) => update("company.email", e.target.value)} 
-                disabled={isGroupLocked('company')}
-              />
-            </Labeled>
-            <div className="md:col-span-3">
-              <Labeled label="Indirizzo">
+            <div className="grid gap-3 md:grid-cols-3">
+              <Labeled label="Nome società">
                 <Input 
-                  value={local.company.address} 
-                  onChange={(e) => update("company.address", e.target.value)} 
+                  value={local.company.name} 
+                  onChange={(e) => update("company.name", e.target.value)} 
                   disabled={isGroupLocked('company')}
                 />
               </Labeled>
+              <Labeled label="Logo (testo breve)">
+                <Input 
+                  value={local.company.logoText} 
+                  onChange={(e) => update("company.logoText", e.target.value)} 
+                  disabled={isGroupLocked('company')}
+                />
+              </Labeled>
+              <Labeled label="Telefono">
+                <Input 
+                  value={local.company.phone} 
+                  onChange={(e) => update("company.phone", e.target.value)} 
+                  disabled={isGroupLocked('company')}
+                />
+              </Labeled>
+              <Labeled label="Email">
+                <Input 
+                  value={local.company.email} 
+                  onChange={(e) => update("company.email", e.target.value)} 
+                  disabled={isGroupLocked('company')}
+                />
+              </Labeled>
+              <div className="md:col-span-3">
+                <Labeled label="Indirizzo">
+                  <Input 
+                    value={local.company.address} 
+                    onChange={(e) => update("company.address", e.target.value)} 
+                    disabled={isGroupLocked('company')}
+                  />
+                </Labeled>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </div>
 
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Parametri di calcolo</h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.pricing}
-                onChange={(v) => update("locked.pricing", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('pricing') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('pricing')}>
-                  Sblocca
-                </Button>
-              )}
+        {/* --- Card Parametri di calcolo --- */}
+        <div className={activeSection && activeSection !== "admin-pricing" ? "hidden" : ""}>
+          <Card id="admin-pricing">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Parametri di calcolo</h3>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.locked.pricing}
+                  onChange={(v) => update("locked.pricing", v)}
+                  label="Protetto"
+                />
+                {isGroupLocked('pricing') && (
+                  <Button variant="subtle" size="sm" onClick={() => handleUnlock('pricing')}>
+                    Sblocca
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-5">
-            <Labeled label="Prezzo energia (CHF/kWh)">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.energyPriceCHFPerKWh}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, energyPriceCHFPerKWh: v } }));
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      energyPriceCHFPerKWh: isNaN(v) ? l.pricing.energyPriceCHFPerKWh : String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('pricing')}
-              />
-            </Labeled>
-            <Labeled label="Manutenzione CHF/pannello (excl. IVA)">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.maintenancePricePerPanelCHF}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, maintenancePricePerPanelCHF: v } }));
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      maintenancePricePerPanelCHF: isNaN(v) ? l.pricing.maintenancePricePerPanelCHF : String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('pricing')}
-              />
-            </Labeled>
-            <Labeled label="IVA %">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.vatPercent}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, vatPercent: v } }));
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      vatPercent: isNaN(v) ? l.pricing.vatPercent : String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('pricing')}
-              />
-            </Labeled>
-            <Labeled label="Prezzo unitario impianto (CHF/kW)">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.systemPricePerKWCHF}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, systemPricePerKWCHF: v } }));
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      systemPricePerKWCHF: isNaN(v) ? l.pricing.systemPricePerKWCHF : String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('pricing')}
-              />
-            </Labeled>
-            <Labeled label="Taglie FV disponibili (kW, separate da virgola)">
-              <Input
-                value={pvSizesText}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,;\s]*$/.test(v)) setPvSizesText(v);
-                }}
-                onBlur={() => {
-                  const arr = pvSizesText
-                    .split(/[;,\s]+/)
-                    .map(x => parseFloat(String(x).replace(",", ".")))
-                    .filter(x => !isNaN(x) && x > 0);
-                  setLocal(l => ({ ...l, pvSizesKW: arr }));
-                  setPvSizesText(arr.join(", "));
-                }}
-                disabled={isGroupLocked('pricing')}
-              />
-            </Labeled>
-          </div>
-        </Card>
+            <div className="grid gap-3 md:grid-cols-5">
+              <Labeled label="Prezzo energia (CHF/kWh)">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.energyPriceCHFPerKWh}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, energyPriceCHFPerKWh: v } }));
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        energyPriceCHFPerKWh: isNaN(v) ? l.pricing.energyPriceCHFPerKWh : String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('pricing')}
+                />
+              </Labeled>
+              <Labeled label="Manutenzione CHF/pannello (excl. IVA)">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.maintenancePricePerPanelCHF}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, maintenancePricePerPanelCHF: v } }));
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        maintenancePricePerPanelCHF: isNaN(v) ? l.pricing.maintenancePricePerPanelCHF : String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('pricing')}
+                />
+              </Labeled>
+              <Labeled label="IVA %">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.vatPercent}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, vatPercent: v } }));
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        vatPercent: isNaN(v) ? l.pricing.vatPercent : String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('pricing')}
+                />
+              </Labeled>
+              <Labeled label="Prezzo unitario impianto (CHF/kW)">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.systemPricePerKWCHF}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, systemPricePerKWCHF: v } }));
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        systemPricePerKWCHF: isNaN(v) ? l.pricing.systemPricePerKWCHF : String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('pricing')}
+                />
+              </Labeled>
+              <Labeled label="Taglie FV disponibili (kW, separate da virgola)">
+                <Input
+                  value={pvSizesText}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,;\s]*$/.test(v)) setPvSizesText(v);
+                  }}
+                  onBlur={() => {
+                    const arr = pvSizesText
+                      .split(/[;,\s]+/)
+                      .map(x => parseFloat(String(x).replace(",", ".")))
+                      .filter(x => !isNaN(x) && x > 0);
+                    setLocal(l => ({ ...l, pvSizesKW: arr }));
+                    setPvSizesText(arr.join(", "));
+                  }}
+                  disabled={isGroupLocked('pricing')}
+                />
+              </Labeled>
+            </div>
+          </Card>
+        </div>
         
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Range prezzo (CHF/kW)</h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.curve}
-                onChange={(v) => update("locked.curve", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('curve') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('curve')}>
-                  Sblocca
-                </Button>
-              )}
+        {/* --- Card Range prezzo (CHF/kW) --- */}
+        <div className={activeSection && activeSection !== "admin-curve" ? "hidden" : ""}>
+          <Card id="admin-curve">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Range prezzo (CHF/kW)</h3>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.locked.curve}
+                  onChange={(v) => update("locked.curve", v)}
+                  label="Protetto"
+                />
+                {isGroupLocked('curve') && (
+                  <Button variant="subtle" size="sm" onClick={() => handleUnlock('curve')}>
+                    Sblocca
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-5">
-            <div className="flex items-center gap-2 md:col-span-5">
-              <Checkbox
-                checked={curveEnabled}
-                onChange={setCurveEnabled}
-                label="Abilita range prezzo"
-                disabled={isGroupLocked('curve')}
-              />
+            <div className="grid gap-3 md:grid-cols-5">
+              <div className="flex items-center gap-2 md:col-span-5">
+                <Checkbox
+                  checked={curveEnabled}
+                  onChange={setCurveEnabled}
+                  label="Abilita range prezzo"
+                  disabled={isGroupLocked('curve')}
+                />
+              </div>
+              <Labeled label="Potenza minima (kW)">
+                <Input
+                  inputMode="numeric"
+                  value={curveMinKW}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9]*$/.test(v)) setCurveMinKW(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseInt(e.target.value);
+                    setCurveMinKW(isNaN(v) ? curveMinKW : String(v));
+                  }}
+                  disabled={isGroupLocked('curve')}
+                />
+              </Labeled>
+              <Labeled label="Prezzo di partenza (CHF/kW @ min)">
+                <Input
+                  inputMode="decimal"
+                  value={curvePriceAtMin}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setCurvePriceAtMin(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setCurvePriceAtMin(isNaN(v) ? curvePriceAtMin : String(v));
+                  }}
+                  disabled={isGroupLocked('curve')}
+                />
+              </Labeled>
+              <Labeled label="Soglia alta (kW)">
+                <Input
+                  inputMode="numeric"
+                  value={curveMaxKW}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9]*$/.test(v)) setCurveMaxKW(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseInt(e.target.value);
+                    setCurveMaxKW(isNaN(v) ? curveMaxKW : String(v));
+                  }}
+                  disabled={isGroupLocked('curve')}
+                />
+              </Labeled>
+              <Labeled label="Prezzo per impianti ≥ soglia (CHF/kW)">
+                <Input
+                  inputMode="decimal"
+                  value={curvePriceAtMax}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setCurvePriceAtMax(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setCurvePriceAtMax(isNaN(v) ? curvePriceAtMax : String(v));
+                  }}
+                  disabled={isGroupLocked('curve')}
+                />
+              </Labeled>
             </div>
-            <Labeled label="Potenza minima (kW)">
-              <Input
-                inputMode="numeric"
-                value={curveMinKW}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9]*$/.test(v)) setCurveMinKW(v);
-                }}
-                onBlur={e => {
-                  const v = parseInt(e.target.value);
-                  setCurveMinKW(isNaN(v) ? curveMinKW : String(v));
-                }}
-                disabled={isGroupLocked('curve')}
-              />
-            </Labeled>
-            <Labeled label="Prezzo di partenza (CHF/kW @ min)">
-              <Input
-                inputMode="decimal"
-                value={curvePriceAtMin}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setCurvePriceAtMin(v);
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setCurvePriceAtMin(isNaN(v) ? curvePriceAtMin : String(v));
-                }}
-                disabled={isGroupLocked('curve')}
-              />
-            </Labeled>
-            <Labeled label="Soglia alta (kW)">
-              <Input
-                inputMode="numeric"
-                value={curveMaxKW}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9]*$/.test(v)) setCurveMaxKW(v);
-                }}
-                onBlur={e => {
-                  const v = parseInt(e.target.value);
-                  setCurveMaxKW(isNaN(v) ? curveMaxKW : String(v));
-                }}
-                disabled={isGroupLocked('curve')}
-              />
-            </Labeled>
-            <Labeled label="Prezzo per impianti ≥ soglia (CHF/kW)">
-              <Input
-                inputMode="decimal"
-                value={curvePriceAtMax}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setCurvePriceAtMax(v);
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setCurvePriceAtMax(isNaN(v) ? curvePriceAtMax : String(v));
-                }}
-                disabled={isGroupLocked('curve')}
-              />
-            </Labeled>
-          </div>
-          <div className="mt-2 text-xs text-zinc-500">
-            8 kW → {currency(pricePerKWFromCurve(8, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
-            &nbsp;·&nbsp;50 kW → {currency(pricePerKWFromCurve(50, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
-            &nbsp;·&nbsp;200 kW → {currency(pricePerKWFromCurve(200, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
-          </div>
-        </Card>
+            <div className="mt-2 text-xs text-zinc-500">
+              8 kW → {currency(pricePerKWFromCurve(8, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
+              &nbsp;·&nbsp;50 kW → {currency(pricePerKWFromCurve(50, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
+              &nbsp;·&nbsp;200 kW → {currency(pricePerKWFromCurve(200, {minKW:curveMinKW,priceAtMin:curvePriceAtMin,maxKW:curveMaxKW,priceAtMax:curvePriceAtMax}))}
+            </div>
+          </Card>
+        </div>
         
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Incentivi (CHF/kW)</h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.incentives}
-                onChange={(v) => update("locked.incentives", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('incentives') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('incentives')}>
-                  Sblocca
-                </Button>
-              )}
+        {/* --- Card Incentivi (CHF/kW) --- */}
+        <div className={activeSection && activeSection !== "admin-incentives" ? "hidden" : ""}>
+          <Card id="admin-incentives">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Incentivi (CHF/kW)</h3>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.locked.incentives}
+                  onChange={(v) => update("locked.incentives", v)}
+                  label="Protetto"
+                />
+                {isGroupLocked('incentives') && (
+                  <Button variant="subtle" size="sm" onClick={() => handleUnlock('incentives')}>
+                    Sblocca
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Labeled label="Incentivo federale (CHF/kW)">
-              <Input
-                inputMode="decimal"
-                value={federalIncentive}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setFederalIncentive(v);
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setFederalIncentive(isNaN(v) ? federalIncentive : String(v));
-                }}
-                disabled={isGroupLocked('incentives')}
-              />
-            </Labeled>
-            <Labeled label="Incentivo cantonale (CHF/kW)">
-              <Input
-                inputMode="decimal"
-                value={cantonalIncentive}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setCantonalIncentive(v);
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setCantonalIncentive(isNaN(v) ? cantonalIncentive : String(v));
-                }}
-                disabled={isGroupLocked('incentives')}
-              />
-            </Labeled>
-            <Labeled label="Incentivo comunale (CHF/kW)">
-              <Input
-                inputMode="decimal"
-                value={municipalIncentive}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setMunicipalIncentive(v);
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setMunicipalIncentive(isNaN(v) ? municipalIncentive : String(v));
-                }}
-                disabled={isGroupLocked('incentives')}
-              />
-            </Labeled>
-          </div>
-          <div className="mt-2 text-xs text-zinc-500">
-            Nota: i valori sono in CHF/kW. L'incentivo comunale è indicativo e altamente variabile; conferma necessaria. Federale e cantonale sono generalmente garantiti.
-          </div>
-        </Card>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Labeled label="Incentivo federale (CHF/kW)">
+                <Input
+                  inputMode="decimal"
+                  value={federalIncentive}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setFederalIncentive(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setFederalIncentive(isNaN(v) ? federalIncentive : String(v));
+                  }}
+                  disabled={isGroupLocked('incentives')}
+                />
+              </Labeled>
+              <Labeled label="Incentivo cantonale (CHF/kW)">
+                <Input
+                  inputMode="decimal"
+                  value={cantonalIncentive}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setCantonalIncentive(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setCantonalIncentive(isNaN(v) ? cantonalIncentive : String(v));
+                  }}
+                  disabled={isGroupLocked('incentives')}
+                />
+              </Labeled>
+              <Labeled label="Incentivo comunale (CHF/kW)">
+                <Input
+                  inputMode="decimal"
+                  value={municipalIncentive}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setMunicipalIncentive(v);
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setMunicipalIncentive(isNaN(v) ? municipalIncentive : String(v));
+                  }}
+                  disabled={isGroupLocked('incentives')}
+                />
+              </Labeled>
+            </div>
+            <div className="mt-2 text-xs text-zinc-500">
+              Nota: i valori sono in CHF/kW. L'incentivo comunale è indicativo e altamente variabile; conferma necessaria. Federale e cantonale sono generalmente garantiti.
+            </div>
+          </Card>
+        </div>
         
-        <Card>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Autoconsumo & Immissione</h3>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                checked={settings.locked.energy}
-                onChange={(v) => update("locked.energy", v)}
-                label="Protetto"
-              />
-              {isGroupLocked('energy') && (
-                <Button variant="subtle" size="sm" onClick={() => handleUnlock('energy')}>
-                  Sblocca
-                </Button>
-              )}
+        {/* --- Card Autoconsumo & Immissione --- */}
+        <div className={activeSection && activeSection !== "admin-energy" ? "hidden" : ""}>
+          <Card id="admin-energy">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Autoconsumo & Immissione</h3>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.locked.energy}
+                  onChange={(v) => update("locked.energy", v)}
+                  label="Protetto"
+                />
+                {isGroupLocked('energy') && (
+                  <Button variant="subtle" size="sm" onClick={() => handleUnlock('energy')}>
+                    Sblocca
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Labeled label="% Autoconsumo con pompa di calore">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.selfConsumptionPctWithHeatPump}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, selfConsumptionPctWithHeatPump: v } }));
-                }}
-                onBlur={e => {
-                  let v = parseFloat(e.target.value.replace(",", "."));
-                  if (isNaN(v)) v = 75;
-                  v = Math.max(0, Math.min(100, v));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      selfConsumptionPctWithHeatPump: String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('energy')}
-              />
-            </Labeled>
-            <Labeled label="% Autoconsumo senza pompa di calore">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.selfConsumptionPctWithoutHeatPump}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, selfConsumptionPctWithoutHeatPump: v } }));
-                }}
-                onBlur={e => {
-                  let v = parseFloat(e.target.value.replace(",", "."));
-                  if (isNaN(v)) v = 65;
-                  v = Math.max(0, Math.min(100, v));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      selfConsumptionPctWithoutHeatPump: String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('energy')}
-              />
-            </Labeled>
-            <Labeled label="Prezzo vendita energia (CHF/kWh)">
-              <Input
-                inputMode="decimal"
-                value={local.pricing.exportPriceCHFPerKWh}
-                onChange={e => {
-                  const v = e.target.value;
-                  if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, exportPriceCHFPerKWh: v } }));
-                }}
-                onBlur={e => {
-                  const v = parseFloat(e.target.value.replace(",", "."));
-                  setLocal(l => ({
-                    ...l,
-                    pricing: {
-                      ...l.pricing,
-                      exportPriceCHFPerKWh: isNaN(v) ? l.pricing.exportPriceCHFPerKWh : String(v)
-                    }
-                  }));
-                }}
-                disabled={isGroupLocked('energy')}
-              />
-            </Labeled>
-          </div>
-        </Card>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Labeled label="% Autoconsumo con pompa di calore">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.selfConsumptionPctWithHeatPump}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, selfConsumptionPctWithHeatPump: v } }));
+                  }}
+                  onBlur={e => {
+                    let v = parseFloat(e.target.value.replace(",", "."));
+                    if (isNaN(v)) v = 75;
+                    v = Math.max(0, Math.min(100, v));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        selfConsumptionPctWithHeatPump: String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('energy')}
+                />
+              </Labeled>
+              <Labeled label="% Autoconsumo senza pompa di calore">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.selfConsumptionPctWithoutHeatPump}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, selfConsumptionPctWithoutHeatPump: v } }));
+                  }}
+                  onBlur={e => {
+                    let v = parseFloat(e.target.value.replace(",", "."));
+                    if (isNaN(v)) v = 65;
+                    v = Math.max(0, Math.min(100, v));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        selfConsumptionPctWithoutHeatPump: String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('energy')}
+                />
+              </Labeled>
+              <Labeled label="Prezzo vendita energia (CHF/kWh)">
+                <Input
+                  inputMode="decimal"
+                  value={local.pricing.exportPriceCHFPerKWh}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (/^[0-9.,]*$/.test(v)) setLocal(l => ({ ...l, pricing: { ...l.pricing, exportPriceCHFPerKWh: v } }));
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value.replace(",", "."));
+                    setLocal(l => ({
+                      ...l,
+                      pricing: {
+                        ...l.pricing,
+                        exportPriceCHFPerKWh: isNaN(v) ? l.pricing.exportPriceCHFPerKWh : String(v)
+                      }
+                    }));
+                  }}
+                  disabled={isGroupLocked('energy')}
+                />
+              </Labeled>
+            </div>
+          </Card>
+        </div>
         
         <Card>
           <div className="flex items-center justify-between mb-3">

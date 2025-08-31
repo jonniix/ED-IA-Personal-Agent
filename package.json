@@ -1,9 +1,9 @@
 {
-  "name": "pv-event-toolkit",
+  "name": "ed-ia-personal-agent",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "homepage": "https://jonat.github.io/pv-event-toolkit/",
+  "homepage": "https://jonniix.github.io/ED-IA-Personal-Agent/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
