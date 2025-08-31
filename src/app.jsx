@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Sun, Moon, Wrench, PlugZap, Settings, Home, FileText, Printer, Archive } from "lucide-react";
 import { saveOfferToDB, getOfferFromDB, listOffersFromDB, deleteOfferFromDB, savePdfToDB, getPdfFromDB } from "../lib/db";
 import CatalogEditor from "./ai/CatalogEditor.jsx";
+import AIWizard from "./ai/AIWizard.jsx";
 
 // --- Utility helpers ---
 const currency = (n, currency = "CHF") =>
@@ -462,7 +463,14 @@ export default function App() {
             onCreate={buildWallboxOffer}
           />
         )}
-        {route === "ai" && <TriageAssistant setRoute={setRoute} openOffer={aiOpenOffer} />}
+        {route === "ai" && (
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+            <AIWizard
+              settings={settings}
+              setRoute={setRoute}
+            />
+          </motion.div>
+        )}
       </main>
 
       <Footer company={settings.company} />
@@ -1614,6 +1622,7 @@ function AdminPanel({ settings, setSettings, unlockedGroups, unlockGroup }) {
           <div className="grid gap-3 md:grid-cols-2">
             <Labeled label="CO₂ risparmiata per kWh (kg)">
               <Input
+               
                 inputMode="decimal"
                 value={local.environment.co2GridKgPerKWh}
                 onChange={e => {
@@ -3129,10 +3138,10 @@ Le propongo il seguente preventivo per le lavorazioni richieste:\n` +
 }
 
 function Footer({ company }) {
-  const name = company?.name || "La Mia Azienda";
+  const year = new Date().getFullYear();
   return (
     <div className="fixed bottom-0 left-0 right-0 border-t border-zinc-200 bg-white/80 px-4 py-2 text-center text-xs text-zinc-500 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/75">
-      © {new Date().getFullYear()} {name} · Pronto per stampa/PDF · Dati salvati in locale
+      © {year} {company?.name || "La Mia Azienda"} · Pronto per stampa/PDF · Dati salvati in locale
     </div>
   );
 }

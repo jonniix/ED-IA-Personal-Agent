@@ -11,6 +11,11 @@
     <!-- entrypoint standard Vite -->
     <script type="module" src="/src/main.jsx"></script>
     <!-- html2pdf.js CDN for PDF generation -->
-    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+    <!-- TODO(SRI): calcolare hash reale sha384 del file esatto e aggiungere integrity -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
   </body>
 </html>
